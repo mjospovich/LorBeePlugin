@@ -96,7 +96,7 @@ If you get “permission denied” for Docker, use `sudo docker …` once for te
 
 ```bash
 cd ~
-git clone <your-repository-url> LorBeePlugin
+git clone https://github.com/mjospovich/LorBeePlugin.git
 cd LorBeePlugin
 ```
 
