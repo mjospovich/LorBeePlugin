@@ -1,0 +1,85 @@
+# LorBeeOS stack — reference Docker deployment. Paths: see docs/lorbeeos-paths.md and .env.example
+# LORBEE_STACK_ROOT = directory containing this file (default ".").
+# LORBEE_SNAPSHOT_HOST = merged JSON on host (compose default ./data/snapshot if unset).
+
+services:
+  mosquitto:
+    container_name: mosquitto
+    image: eclipse-mosquitto:latest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - TZ=${TZ:-Europe/Zagreb}
+    volumes:
+      - ${LORBEE_STACK_ROOT:-.}/mosquitto/data:/mosquitto/data
+      - ${LORBEE_STACK_ROOT:-.}/mosquitto/config:/mosquitto/config
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mosquitto_pub -h 127.0.0.1 -p 1883 -t lorbee/__health -m 1 -q 1 -r && mosquitto_sub -h 127.0.0.1 -p 1883 -t lorbee/__health -C 1 -W 2",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # After Pi reboot: set ZIGBEE_SERIAL_DEVICE=/dev/serial/by-id/... in .env (not plain ttyUSB0).
+  zigbee2mqtt:
+    container_name: zigbee2mqtt
+    image: koenkk/zigbee2mqtt:latest
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    environment:
+      - TZ=${TZ:-Europe/Zagreb}
+    devices:
+      - ${ZIGBEE_SERIAL_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0
+    volumes:
+      - ${LORBEE_STACK_ROOT:-.}/zigbee2mqtt/data:/app/data
+      - /run/udev:/run/udev:ro
+    group_add:
+      - dialout
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+
+  nodered:
+    container_name: nodered
+    image: nodered/node-red:latest
+    restart: unless-stopped
+    network_mode: host
+    user: ${NODE_RED_USER:-1000:1000}
+    environment:
+      - TZ=${TZ:-Europe/Zagreb}
+      - EDGE_ID=${EDGE_ID:-default}
+    volumes:
+      - ${LORBEE_STACK_ROOT:-.}/nodered/data:/data
+      - ${LORBEE_SNAPSHOT_HOST:-./data/snapshot}:/data/snapshot
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+
+  # Optional: LoRaWAN OTAA node (RFM9x + SPI). Enable with: docker compose --profile lora up -d
+  chirpstack-lora-node:
+    profiles: ["lora"]
+    container_name: chirpstack-lora-node
+    build:
+      context: ${LORBEE_STACK_ROOT:-.}/lora/chirpstack-node
+      dockerfile: Dockerfile
+      args:
+        RADIOLIB_VERSION: "7.6.0"
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    environment:
+      - TZ=${TZ:-Europe/Zagreb}
+      - LORA_CONFIG=/etc/lora/config.yaml
+      - LORAWAN_STATE_DIR=/data/lorawan-state
+    volumes:
+      - ${LORBEE_STACK_ROOT:-.}/lora/chirpstack-node/config.yaml:/etc/lora/config.yaml:ro
+      - ${LORBEE_SNAPSHOT_HOST:-./data/snapshot}:/data/snapshot:ro
+      - ${LORBEE_STACK_ROOT:-.}/data/lorawan-state:/data/lorawan-state
+    env_file:
+      - path: ${LORBEE_STACK_ROOT:-.}/lora/chirpstack-node/keys.env
+        required: false

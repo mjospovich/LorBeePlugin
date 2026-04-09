@@ -1,0 +1,12 @@
+# One-shot a short time after boot so Docker + udev can run first; the script still
+# waits up to ZIGBEE_SERIAL_WAIT_SEC (default 180) for the coordinator device.
+
+[Unit]
+Description=Run lorbee-zigbee-after-boot once per cold boot
+
+[Timer]
+OnBootSec=45s
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

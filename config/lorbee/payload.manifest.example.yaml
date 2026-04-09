@@ -1,0 +1,16 @@
+# Mirror of the LoRa "packed" payload plan for documentation and ChirpStack codec sync.
+# Copy values into lora/chirpstack-node/config.yaml under `payload:` when you deploy.
+# After changing entries or field order, update the device profile codec on ChirpStack (see docs/lorbee-data.md).
+
+format: packed
+include_status: false
+max_bytes: 222
+
+# Ordered uplink rows: device = IEEE key in snapshot.devices (from Zigbee2MQTT / Node-RED).
+entries:
+  - id: 1
+    device: "0x0011223344556677"
+    fields: [temperature, humidity]
+  - id: 2
+    device: "0x8899aabbccddeeff"
+    fields: [occupancy, illumination]

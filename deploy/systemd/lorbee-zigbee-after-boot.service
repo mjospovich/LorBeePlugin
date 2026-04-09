@@ -1,0 +1,22 @@
+# Prefer: sudo bash scripts/install-zigbee-boot-timer.sh   (from repo root)
+# Or:     make install-boot-timer
+# Manual: sudo cp deploy/systemd/lorbee-zigbee-after-boot.{service,timer} /etc/systemd/system/
+#         sudo sed -i 's|STACK_ROOT_PLACEHOLDER|/absolute/path/to/repo|' /etc/systemd/system/lorbee-zigbee-after-boot.service
+#         sudo systemctl daemon-reload && sudo systemctl enable --now lorbee-zigbee-after-boot.timer
+#
+# Fires once per boot after a short delay; script waits up to ZIGBEE_SERIAL_WAIT_SEC for USB.
+# Runs stack-after-boot.sh: up mosquitto+zigbee2mqtt+nodered, optional restart zigbee2mqtt, optional LoRa.
+# Optional .env: COMPOSE_PROFILES=lora or LORBEE_LORA_ON_BOOT=1 for chirpstack-lora-node.
+
+[Unit]
+Description=LorBee: start stack after USB (Mosquitto, Zigbee2MQTT, Node-RED; optional LoRa)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory=STACK_ROOT_PLACEHOLDER
+ExecStart=STACK_ROOT_PLACEHOLDER/scripts/stack-after-boot.sh
+
+# Enable the .timer, not this service directly (avoids double runs at boot).

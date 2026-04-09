@@ -1,0 +1,30 @@
+# Copy to config.yaml if you want a local template, or edit the repo config.yaml.
+# Same schema as config.yaml — see lora/README.md.
+
+hardware:
+  spi_channel: 1
+  pins:
+    cs: 17
+    dio0: 22
+    rst: 25
+
+lorawan:
+  region: EU868
+  sub_band: 0
+  uplink_interval_sec: 300
+
+snapshot:
+  path: /data/snapshot/latest.json
+  device_ieee: ""
+
+# payload:
+#   format: packed
+#   include_status: true
+#   max_bytes: 222
+#   entries:
+#     - id: 1
+#       device: "0x0011223344556677"
+#       fields: [temperature, humidity]
+#     - id: 2
+#       device: "0x8899aabbccddeeff"
+#       fields: [occupancy, illumination]

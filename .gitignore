@@ -1,41 +1,46 @@
-# Prerequisites
-*.d
+# Local overrides (see .env.example)
+.env
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# Zigbee2MQTT runtime (secrets + state)
+zigbee2mqtt/data/configuration.yaml
+zigbee2mqtt/data/state.json
+zigbee2mqtt/data/database.db*
+zigbee2mqtt/data/coordinator_backup.json
+zigbee2mqtt/data/log/
+zigbee2mqtt/data/migration*.log
+zigbee2mqtt/data/configuration_backup*.yaml
 
-# Precompiled Headers
-*.gch
-*.pch
+# LorBee merged snapshot (canonical location)
+data/snapshot/*.json
 
-# Linker files
-*.ilk
+# LoRaWAN OTAA persisted session (RadioLib nonces + session buffers)
+data/lorawan-state/
 
-# Debugger Files
-*.pdb
+# Node-RED runtime
+nodered/data/flows_cred.json
+nodered/data/*.backup
+nodered/data/.config*.backup
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
+# Duplicate / archive flows (canonical: nodered/data/flows.json)
+nodered/flows/
 
-# Fortran module files
-*.mod
-*.smod
+# Mosquitto persistence
+mosquitto/data/
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
+# LoRaWAN OTAA secrets (see lora/chirpstack-node/keys.env.example)
+lora/chirpstack-node/keys.env
 
-# Executables
-*.exe
-*.out
-*.app
+# LoRa node runtime (often contains site-specific Zigbee IEEEs in payload.entries — use config.example.yaml)
+lora/chirpstack-node/config.yaml
 
-# debug information files
-*.dwo
+# RadioLib clone for host builds (optional)
+lora/chirpstack-node/RadioLib/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+nodered/data/snapshot/latest.json

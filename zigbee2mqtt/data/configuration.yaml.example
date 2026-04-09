@@ -1,0 +1,31 @@
+version: 4
+mqtt:
+  base_topic: zigbee2mqtt
+  server: mqtt://localhost:1883
+serial:
+  port: /dev/ttyUSB0
+  baudrate: 115200
+  adapter: zstack
+  rtscts: false
+  disable_led: false
+advanced:
+  log_level: info
+  # Zigbee 2.4 GHz RF channel (11–26). MUST differ from nearby Zigbee coordinators on
+  # overlapping RF; also consider Wi‑Fi (e.g. Wi‑Fi ch 1–6 ↔ Zigbee ~11–19). See docs/zigbee2mqtt.md.
+  channel: 15
+  # Optional: transmit_power (dBm), not all adapters support it — see Zigbee2MQTT docs.
+  # transmit_power: 20
+  # network_key, pan_id, and ext_pan_id are auto-generated on first start.
+  # Do NOT commit the real values — they are sensitive.
+frontend:
+  enabled: true
+  port: 8080
+homeassistant:
+  enabled: false
+
+# Common optional blocks (uncomment if you want them):
+#
+# availability:
+#   enabled: true
+#   passive:
+#     timeout: 4320   # minutes; see docs/zigbee2mqtt.md
