@@ -2,9 +2,45 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+
+// ---------------------------------------------------------------------------
+// Sensor Type Registry — single source of truth for encoder + decoder.
+// ---------------------------------------------------------------------------
+
+static std::vector<SensorTypeDef> build_registry() {
+  std::vector<SensorTypeDef> r;
+  r.push_back({SensorType::Climate, "climate", {"temperature", "humidity"}});
+  r.push_back({SensorType::Motion,  "motion",  {"occupancy", "illumination"}});
+  r.push_back({SensorType::Contact, "contact", {"contact"}});
+  return r;
+}
+
+const std::vector<SensorTypeDef>& sensor_type_registry() {
+  static const std::vector<SensorTypeDef> reg = build_registry();
+  return reg;
+}
+
+const SensorTypeDef* sensor_type_by_name(const std::string& name) {
+  for(const auto& td : sensor_type_registry()) {
+    if(name == td.name) { return &td; }
+  }
+  return nullptr;
+}
+
+const SensorTypeDef* sensor_type_by_id(uint8_t id) {
+  for(const auto& td : sensor_type_registry()) {
+    if(static_cast<uint8_t>(td.type) == id) { return &td; }
+  }
+  return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Config validation / defaults / loading
+// ---------------------------------------------------------------------------
 
 bool app_config_valid(const AppConfig& cfg, std::string& err) {
   if(cfg.payload.format == PayloadFormat::Packed && cfg.payload.entries.empty()) {
@@ -47,6 +83,60 @@ std::string resolve_lora_config_path() {
   if(file_readable("config.yaml")) { return "config.yaml"; }
   if(file_readable("/etc/lora/config.yaml")) { return "/etc/lora/config.yaml"; }
   return {};
+}
+
+static bool parse_entry_type(const YAML::Node& en, PayloadEntry& pe, std::string& err) {
+  bool has_type = en["type"].IsDefined();
+  bool has_fields = en["fields"] && en["fields"].IsSequence();
+
+  if(has_type) {
+    std::string tname = en["type"].as<std::string>();
+    const SensorTypeDef* td = sensor_type_by_name(tname);
+    if(!td) {
+      err = "payload.entries: unknown sensor type '" + tname +
+            "'. Known types:";
+      for(const auto& r : sensor_type_registry()) {
+        err += " ";
+        err += r.name;
+      }
+      return false;
+    }
+    pe.sensor_type = td->type;
+    pe.fields = td->fields;
+    if(has_fields) {
+      err = "payload.entries: entry has both 'type' and 'fields'; "
+            "use 'type' only (fields are derived from the sensor type registry)";
+      return false;
+    }
+    return true;
+  }
+
+  if(has_fields) {
+    for(const auto& fe : en["fields"]) {
+      pe.fields.push_back(fe.as<std::string>());
+    }
+    // Try to match fields to a known sensor type for backward compat.
+    for(const auto& td : sensor_type_registry()) {
+      if(td.fields == pe.fields) {
+        pe.sensor_type = td.type;
+        return true;
+      }
+    }
+    err = "payload.entries: 'fields' list does not match any known sensor type. "
+          "Use 'type: <name>' instead. Known types:";
+    for(const auto& r : sensor_type_registry()) {
+      err += " " + std::string(r.name) + "=[";
+      for(size_t i = 0; i < r.fields.size(); i++) {
+        if(i) { err += ","; }
+        err += r.fields[i];
+      }
+      err += "]";
+    }
+    return false;
+  }
+
+  err = "payload.entries: each entry must have a 'type' field (e.g. type: climate)";
+  return false;
 }
 
 bool load_app_config(const char* config_path, AppConfig& out, std::string& err) {
@@ -118,7 +208,7 @@ bool load_app_config(const char* config_path, AppConfig& out, std::string& err) 
           return false;
         }
         out.payload.entries.clear();
-        uint8_t auto_seq = 0;
+        uint8_t auto_seq = 1;
         for(const auto& en : eseq) {
           PayloadEntry pe;
           if(en["id"].IsDefined()) {
@@ -131,11 +221,7 @@ bool load_app_config(const char* config_path, AppConfig& out, std::string& err) 
             if(auto_seq < 255) { ++auto_seq; }
           }
           if(en["device"].IsDefined()) { pe.device = en["device"].as<std::string>(); }
-          if(en["fields"] && en["fields"].IsSequence()) {
-            for(const auto& fe : en["fields"]) {
-              pe.fields.push_back(fe.as<std::string>());
-            }
-          }
+          if(!parse_entry_type(en, pe, err)) { return false; }
           out.payload.entries.push_back(std::move(pe));
         }
       }
@@ -198,8 +284,5 @@ void apply_env_overrides(AppConfig& cfg) {
   }
   if(std::getenv("PAYLOAD_MAX_BYTES") && std::getenv("PAYLOAD_MAX_BYTES")[0]) {
     cfg.payload.max_bytes = (uint32_t)std::strtoul(std::getenv("PAYLOAD_MAX_BYTES"), nullptr, 10);
-  }
-  if(cfg.payload.format == PayloadFormat::Packed && cfg.payload.entries.empty()) {
-    // env cannot define entries; keep YAML requirement
   }
 }

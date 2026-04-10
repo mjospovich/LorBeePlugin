@@ -16,12 +16,24 @@ ARG RADIOLIB_VERSION=7.6.0
 RUN git clone --depth 1 --branch ${RADIOLIB_VERSION} https://github.com/jgromes/RadioLib.git /opt/RadioLib
 
 WORKDIR /opt/chirpstack-node
-COPY CMakeLists.txt main.cpp config.hpp config_yaml.cpp snapshot.hpp snapshot.cpp \
-    payload_builder.hpp payload_builder.cpp lora_state.hpp lora_state.cpp config.yaml ./
-RUN mkdir -p /etc/lora && cp config.yaml /etc/lora/config.yaml
-RUN mkdir build && cd build \
+
+# --- Dependency layer (cached until CMakeLists.txt or RadioLib version changes) ---
+# Stub source files let cmake configure + compile RadioLib and fetch nlohmann_json.
+# Our stubs compile to empty .o; the final link fails (no main) but deps are built.
+COPY CMakeLists.txt ./
+RUN touch main.cpp config.hpp config_yaml.cpp snapshot.hpp snapshot.cpp \
+    payload_builder.hpp payload_builder.cpp lora_state.hpp lora_state.cpp config.yaml \
+    && mkdir build && cd build \
     && cmake .. -DRADIOLIB_ROOT=/opt/RadioLib \
-    && cmake --build . -j2
+    && cmake --build . -j2 || true
+
+# --- Application layer (only this rebuilds on source changes — seconds, not minutes) ---
+COPY main.cpp config.hpp config_yaml.cpp snapshot.hpp snapshot.cpp \
+    payload_builder.hpp payload_builder.cpp lora_state.hpp lora_state.cpp config.yaml ./
+RUN touch main.cpp config.hpp config_yaml.cpp snapshot.hpp snapshot.cpp \
+    payload_builder.hpp payload_builder.cpp lora_state.hpp lora_state.cpp
+RUN mkdir -p /etc/lora && cp config.yaml /etc/lora/config.yaml
+RUN cd build && cmake --build . -j2
 
 FROM debian:bookworm-slim
 

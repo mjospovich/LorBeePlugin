@@ -21,29 +21,54 @@ struct LoraWanRadioConfig {
 
 /// Node-RED merged sensor snapshot (see docs/architecture.md).
 struct SnapshotConfig {
-  /// Path to latest.json (host: repo path; Docker: mount at this path).
   std::string path = "/data/snapshot/latest.json";
-  /// If non-empty, use this `devices` key only; else first device with temp+humidity.
   std::string device_ieee;
 };
 
 enum class PayloadFormat { Legacy, Packed };
 
-/// One device block in a packed uplink: `devices` key + ordered data fields (see lora/README.md).
-struct PayloadEntry {
-  /// One-byte handle in the air payload so the ChirpStack codec can tell entries apart (0–255).
-  /// If omitted in YAML, set to 0, 1, 2, … in order.
-  uint8_t id = 0;
-  std::string device;
+// ---------------------------------------------------------------------------
+// Sensor Type Registry — standardized mapping shared by encoder + decoder.
+// Add new types at the end; never reuse or reorder existing IDs.
+// See lora/README.md § "Sensor Type Registry".
+// ---------------------------------------------------------------------------
+enum class SensorType : uint8_t {
+  Climate = 0x01,   // temperature (i16 BE) + humidity (u16 BE)  — 4 data bytes
+  Motion  = 0x02,   // occupancy (u8)       + illumination (u8)  — 2 data bytes
+  Contact = 0x03,   // contact (u8)                              — 1 data byte
+};
+
+struct SensorTypeDef {
+  SensorType type;
+  const char* name;
   std::vector<std::string> fields;
 };
 
-/// Application payload layout (only the bytes you send; not LoRaWAN MAC overhead).
+/// Canonical registry. The encoder writes the type byte on-air; the decoder
+/// uses the same table to know what bytes follow. Keep in sync with the
+/// ChirpStack codec TYPES map (see lora/README.md).
+const std::vector<SensorTypeDef>& sensor_type_registry();
+
+/// Look up a SensorTypeDef by its string name (e.g. "climate"). nullptr if unknown.
+const SensorTypeDef* sensor_type_by_name(const std::string& name);
+
+/// Look up by numeric wire ID. nullptr if unknown.
+const SensorTypeDef* sensor_type_by_id(uint8_t id);
+
+/// One device block in a packed uplink (see lora/README.md).
+struct PayloadEntry {
+  /// Instance label (0–255) — the decoder uses this + sensor_type to identify the entry.
+  uint8_t id = 0;
+  std::string device;
+  /// Sensor type determines which fields are encoded and in what order.
+  SensorType sensor_type = SensorType::Climate;
+  /// Resolved field list (derived from sensor_type via registry, not user-specified).
+  std::vector<std::string> fields;
+};
+
 struct PayloadConfig {
   PayloadFormat format = PayloadFormat::Legacy;
-  /// After each entry’s `fields`, append linkquality (u8), battery (u8), voltage (u16 BE).
   bool include_status = false;
-  /// Reject packed payloads larger than this (EU868 DR0 ~51 B; leave headroom for your DR).
   uint32_t max_bytes = 222;
   std::vector<PayloadEntry> entries;
 };

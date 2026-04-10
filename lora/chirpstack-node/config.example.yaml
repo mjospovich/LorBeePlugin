@@ -24,7 +24,7 @@ snapshot:
 #   entries:
 #     - id: 1
 #       device: "0x0011223344556677"
-#       fields: [temperature, humidity]
+#       type: climate
 #     - id: 2
 #       device: "0x8899aabbccddeeff"
-#       fields: [occupancy, illumination]
+#       type: motion

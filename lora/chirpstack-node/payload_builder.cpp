@@ -104,6 +104,18 @@ static bool encode_data_field(const std::string& fname, const nlohmann::json& de
     append_u8(buf, e);
     return true;
   }
+  if(fname == "contact") {
+    uint8_t b = 0xff;
+    if(dev.contains("contact")) {
+      if(dev["contact"].is_boolean()) {
+        b = dev["contact"].get<bool>() ? 1 : 0;
+      } else if(dev["contact"].is_number()) {
+        b = dev["contact"].get<double>() != 0.0 ? 1 : 0;
+      }
+    }
+    append_u8(buf, b);
+    return true;
+  }
   if(fname == "linkquality") {
     if(!dev.contains("linkquality") || !dev["linkquality"].is_number_integer()) {
       append_u8(buf, 0xff);
@@ -146,12 +158,16 @@ bool build_packed_uplink_payload(const AppConfig& cfg, const nlohmann::json& sna
     return false;
   }
   const auto& devices = snap_root["devices"];
-  // 0x03 = packed v2: per-entry id byte (see lora/README.md). 0x02 = older builds without id.
-  append_u8(out, 0x03);
+
+  // v4: self-describing entries — each entry carries its sensor_type byte
+  // so the decoder doesn't need a positional PLAN, just the type registry.
+  append_u8(out, 0x04);
   append_u8(out, cfg.payload.include_status ? 1u : 0u);
 
   for(const PayloadEntry& en : cfg.payload.entries) {
     append_u8(out, en.id);
+    append_u8(out, static_cast<uint8_t>(en.sensor_type));
+
     std::string lerr;
     const nlohmann::json* pdev = find_device(devices, en.device, lerr);
     if(!pdev) {

@@ -8,10 +8,10 @@ This document is the **single entry point** for developers: where merged Zigbee 
 |-------|----------------------------------------|--------|
 | **MQTT** (`zigbee2mqtt/...`) | Appears automatically | None |
 | **Merged snapshot** (file + HTTP + `lorbee/...` MQTT) | Device shows up under `devices` keyed by **IEEE** | None |
-| **LoRa `legacy` payload** (4-byte temp/hum) | Only if that device is chosen by `device_ieee` or “first with temp+hum” | May need **`snapshot.device_ieee`** in `lora/chirpstack-node/config.yaml` |
-| **LoRa `packed` payload** | Bytes on air are defined by **`payload.entries`** | Add a row: **`device`** (IEEE from snapshot), **`fields`**, **`id`**; then update **ChirpStack codec** to match order and ids |
+| **LoRa `legacy` payload** (4-byte temp/hum) | Only if that device is chosen by `device_ieee` or "first with temp+hum" | May need **`snapshot.device_ieee`** in `lora/chirpstack-node/config.yaml` |
+| **LoRa `packed` payload** (v4) | Bytes on air are defined by **`payload.entries`** | Add a row: **`device`** (IEEE from snapshot), **`type`** (from Sensor Type Registry), **`id`**. **No codec update** needed if the type already exists. |
 
-So: **the edge always “sees” new sensors immediately**. **Over LoRa**, the air format is finite; adding a new sensor to the radio payload is a **deliberate** step (config + codec), documented below.
+So: **the edge always "sees" new sensors immediately**. **Over LoRa**, the air format is finite; adding a new sensor to the radio payload is a **deliberate** step (config entry), documented below.
 
 ## Canonical paths (host)
 
@@ -53,16 +53,18 @@ Broker: Mosquitto on **`localhost:1883`** (host network from containers).
 | `device_labels` | IEEE → Zigbee2MQTT friendly name |
 | `devices` | Per-radio state (Zigbee2MQTT payload shapes) |
 
-## Adding a new sensor for ChirpStack (packed mode)
+## Adding a new sensor for ChirpStack (packed mode v4)
+
+With the **v4 self-describing payload**, you only edit `config.yaml` on the edge. The ChirpStack universal codec decodes any entry by its **sensor_type** byte — no per-edge PLAN sync needed.
 
 1. Pair the device in Zigbee2MQTT and wait for state on MQTT.
-2. Open **`data/snapshot/latest.json`** (or `GET /api/lorbee/v1/sensors`) and copy the device’s **IEEE** key (e.g. `0x00158d0001234567`).
-3. Edit **`lora/chirpstack-node/config.yaml`**: under **`payload.entries`**, append an entry with that IEEE, ordered **`fields`** supported by the encoder (`temperature`, `humidity`, `occupancy`, `motion`, `illumination`, `brightness`, `linkquality`, `battery`, `voltage` — see [lora/README.md](../lora/README.md)).
-4. Mirror the same plan in **`config/lorbee/payload.manifest.example.yaml`** (or your own copy) so the repo documents what is on-air.
-5. On ChirpStack (main PC), update the **device profile codec**: same **`id`** bytes and **field order** as in YAML. The sample codec in [lora/README.md](../lora/README.md) shows the pattern (`PLAN` / `LABELS` must match your entries).
+2. Open **`data/snapshot/latest.json`** (or `GET /api/lorbee/v1/sensors`) and copy the device's **IEEE** key (e.g. `0x00158d0001234567`).
+3. Edit **`lora/chirpstack-node/config.yaml`**: under **`payload.entries`**, append an entry with that IEEE and a **`type`** from the **Sensor Type Registry** (`climate`, `motion`, `contact` — see [lora/README.md](../lora/README.md) § Sensor Type Registry).
+4. Optionally mirror the same plan in **`config/lorbee/payload.manifest.example.yaml`** so the repo documents what is on-air.
+5. **ChirpStack codec does not need updating** as long as the sensor type already exists in the universal codec's `TYPES` map. If you added a **new** sensor type to the C++ registry, add it to the codec too (see [lora/README.md](../lora/README.md) § universal codec).
 6. Restart the LoRa container: `docker compose --profile lora up -d chirpstack-lora-node` (or your equivalent).
 
-If the payload would exceed **`max_bytes`** or regional limits, remove entries, shorten fields, or send less often — the node logs and skips oversize builds.
+If the payload would exceed **`max_bytes`** or regional limits, remove entries or send less often — the node logs and skips oversize builds.
 
 ## Related docs
 

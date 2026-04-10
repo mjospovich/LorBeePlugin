@@ -10,11 +10,11 @@ The Zigbee/MQTT stack stays unchanged. LoRa runs only when you enable the Compos
 
 There is **no cable or pairing step** between the LoRa module and the **gateway**. In LoRaWAN:
 
-1. **This Pi** is an **end device**: it transmits encrypted **LoRaWAN** frames over the air (868 MHz in EU868, etc.).
+1. **This Pi** is an **end device**: it transmits encrypted **LoRaWAN** frames over the air (868 MHz in EU868, etc.).
 2. The **gateway** is only a **radio bridge**: if it is in range and configured for the same regional band, it receives uplinks and forwards them to **ChirpStack** (usually over IP — Ethernet/Wi‑Fi).
 3. **ChirpStack** is the **network + application server**: it verifies the **Join Request** / **MIC**, stores **keys**, and shows **application payloads** in the web UI.
 
-So “linking” means: **same band + in RF range**, and in ChirpStack you register a device whose **DevEUI / JoinEUI / AppKey** match **`keys.env` on this Pi**. The gateway does not need to know your Pi’s IP; it only forwards what it hears to ChirpStack.
+So "linking" means: **same band + in RF range**, and in ChirpStack you register a device whose **DevEUI / JoinEUI / AppKey** match **`keys.env` on this Pi**. The gateway does not need to know your Pi's IP; it only forwards what it hears to ChirpStack.
 
 ## Registering this Pi in ChirpStack
 
@@ -32,7 +32,7 @@ So “linking” means: **same band + in RF range**, and in ChirpStack you regis
    - `LORAWAN_APP_KEY=...`
 5. Device **profile** in ChirpStack: **LoRaWAN MAC** version **1.0.x** or **1.1** (if 1.0.x, leave `LORAWAN_NWK_KEY` unset in `keys.env`).
 6. **Regional parameters** must match **`lorawan.region`** in `config.yaml` / overrides (e.g. **EU868**).
-7. Start the LoRa container on the Pi; watch **`docker compose logs chirpstack-lora-node`** for join. If you recreated the device, use ChirpStack’s **reset join nonces** once if join is rejected.
+7. Start the LoRa container on the Pi; watch **`docker compose logs chirpstack-lora-node`** for join. If you recreated the device, use ChirpStack's **reset join nonces** once if join is rejected.
 
 Other **non-Zigbee LoRa sensors** on the same gateway are **additional** ChirpStack devices — same idea: one device record per physical radio node, each with its own keys.
 
@@ -70,8 +70,8 @@ The Linux kernel exposes SPI0 as character devices **`/dev/spidev0.0`** and **`/
 
 | `RFM_SPI_CHANNEL` / setup choice | Device node | Typical use |
 |----------------------------------|-------------|-------------|
-| **0** | `/dev/spidev0.0` | SPI “channel 0” / CE0 side of SPI0 |
-| **1** | `/dev/spidev0.1` | SPI “channel 1” / CE1 side (**default** in this repo’s `config.yaml` and wizard) |
+| **0** | `/dev/spidev0.0` | SPI "channel 0" / CE0 side of SPI0 |
+| **1** | `/dev/spidev0.1` | SPI "channel 1" / CE1 side (**default** in this repo's `config.yaml` and wizard) |
 
 **How to choose:** If **`ls /dev/spidev0.*`** lists both, **start with `1`** (matches the shipped example and many wiring guides). If you only see **`spidev0.0`**, choose **0**. If the radio fails to initialise (`ERR_CHIP_NOT_FOUND`, SPI errors), try the other index after checking wiring and SPI enable.
 
@@ -81,9 +81,9 @@ On Raspberry Pi, **GPIO7** and **GPIO8** are **hardware chip selects** for SPI0 
 
 **Fix:** Wire **CS** to any unused GPIO **except** 7, 8, and pins already used for SPI/MISO/MOSI/SCK, **DIO0**, or **RST** (e.g. **BCM17** / pin 11). Set `hardware.pins.cs` in `config.yaml` to match, restart the container. Keep MOSI/MISO/SCK unchanged.
 
-Adafruit’s diagram often shows CS on CE1 for Arduino-style boards; on **Linux + Pi** you need a **separate GPIO** for NSS unless you use a custom device-tree setup.
+Adafruit's diagram often shows CS on CE1 for Arduino-style boards; on **Linux + Pi** you need a **separate GPIO** for NSS unless you use a custom device-tree setup.
 
-## Quick start (Docker — recommended for “clone and run”)
+## Quick start (Docker — recommended for "clone and run")
 
 ```bash
 cd LorBeePlugin   # or your clone directory name
@@ -173,27 +173,67 @@ Uses **`temperature`** and **`humidity`** only:
 | 0–1 | `int16` temperature **centidegrees** (°C × 100); missing → **0x7FFF** |
 | 2–3 | `uint16` humidity **centipercent** (% × 100); missing → **0xFFFF** |
 
-### `packed`
+### `packed` (v4 — self-describing entries)
 
 Set in **`config.yaml`** under **`payload:`** (see comments in `config.yaml` / `config.example.yaml`):
 
 | YAML | Meaning |
 |------|--------|
 | **`format: packed`** | Use multi-sensor binary layout below. |
-| **`entries`** | Ordered list: each **`device`** is a key in `snapshot.devices` (IEEE), **`fields`** = send order. Optional **`id`**: **0–255** (one byte on-air). Omit **`id` on all entries** → auto **0, 1, 2, …**; **do not** mix explicit and omitted `id` in the same file. |
-| **`include_status`** | If **true**, after each entry’s `fields`, append **linkquality** (u8), **battery** (u8, 0–100), **voltage** (u16 BE, mV); **0xFF** / **0xFFFF** if missing. |
+| **`entries`** | Ordered list: each **`device`** is a key in `snapshot.devices` (IEEE), **`type`** selects a sensor type from the **Sensor Type Registry** (fields are derived automatically). Optional **`id`**: **0–255** (instance label). Omit **`id` on all entries** → auto **1, 2, 3, …**; **do not** mix explicit and omitted `id` in the same file. |
+| **`include_status`** | If **true**, after each entry's fields, append **linkquality** (u8), **battery** (u8, 0–100), **voltage** (u16 BE, mV); **0xFF** / **0xFFFF** if missing. |
 | **`max_bytes`** | Build fails (uplink skipped, logged) if longer — tune for your data rate / regional max. |
 
-**Packed layout (v2, current):**
+### Sensor Type Registry
 
-- Byte **0**: **`0x03`**
+The registry is the **single contract** between every edge encoder and the central ChirpStack decoder. Each sensor type has a **numeric ID** (1 byte on-air) and a **fixed field list**. The decoder uses the type byte to know what data follows — no per-edge `PLAN` or `LABELS` needed.
+
+| Type ID | Name | Fields (in order) | Data bytes |
+|---------|------|--------------------|------------|
+| **`0x01`** | **`climate`** | `temperature` (int16 BE, °C×100) + `humidity` (uint16 BE, %×100) | 4 |
+| **`0x02`** | **`motion`** | `occupancy` (uint8, 0/1/0xFF) + `illumination` (uint8, 0–3) | 2 |
+| **`0x03`** | **`contact`** | `contact` (uint8, 0/1/0xFF) | 1 |
+
+**To add a new sensor type:**
+
+1. Pick the next available type ID (e.g. `0x04`).
+2. **C++ encoder:** add the type to `SensorType` enum in `config.hpp` and to `build_registry()` in `config_yaml.cpp`. Add field encoding in `payload_builder.cpp` if needed.
+3. **ChirpStack decoder:** add the type to the `TYPES` map and its read function in the universal codec below.
+4. **Documentation:** add a row to this table and to `config/lorbee/payload.manifest.example.yaml`.
+
+Never reuse or reorder existing type IDs.
+
+**Missing-value sentinels:** `int16` → **`0x7FFF`**, `uint16` → **`0xFFFF`**, `uint8` → **`0xFF`**.
+
+### Packed layout (v4, current)
+
+- Byte **0**: **`0x04`** (version — self-describing entries).
 - Byte **1**: flags — bit **0** = **`include_status`** was **true** in config.
-- For each **`entries[]`** row, **in YAML order**:
-  - **`entry_id`**: **1 byte** (0–255) — same value as **`id`** in YAML (or auto 0, 1, 2, …). Use this in the ChirpStack codec to attach human-readable labels.
-  - Then each **`fields`** value in order (encodings below).
-  - If **`include_status: true`**, append **linkquality**, **battery**, **voltage** for that device.
+- **Repeat** for each **`entries[]`** row (in YAML order, until end of payload):
+  - **`entry_id`**: **1 byte** (0–255). Instance label from **`id`** in YAML.
+  - **`sensor_type`**: **1 byte**. From the Sensor Type Registry (see table above).
+  - **Field data**: bytes as defined by the sensor type.
+  - If **`include_status: true`**: **linkquality** (u8), **battery** (u8), **voltage** (u16 BE) — 4 bytes.
 
-**Field encodings:**
+Because each entry carries its own `sensor_type`, the decoder **does not need a positional PLAN** and **does not break** when entries are added, removed, or reordered. Comment out entries freely; only the entries in `config.yaml` are sent.
+
+**Config example:**
+
+```yaml
+payload:
+  format: packed
+  include_status: false
+  max_bytes: 222
+  entries:
+    - id: 1
+      device: "0x08ddebfffea49ffb"
+      type: climate
+    - id: 2
+      device: "0x0ceff6fffeef6b90"
+      type: motion
+```
+
+**Field encodings (reference):**
 
 | Field | Bytes |
 |-------|--------|
@@ -201,9 +241,18 @@ Set in **`config.yaml`** under **`payload:`** (see comments in `config.yaml` / `
 | **`humidity`** | `uint16` BE, %×100; missing → `0xFFFF` |
 | **`occupancy`** / **`motion`** | `uint8` 0/1; missing → `0xFF` |
 | **`illumination`** / **`brightness`** | `uint8` 0 unknown, 1 dark, 2 medium, 3 bright |
-| **`linkquality`**, **`battery`**, **`voltage`** | Same as in **`fields`** if listed, or via **`include_status`** triplet |
+| **`contact`** | `uint8` 0/1; missing → `0xFF` |
+| **`linkquality`**, **`battery`**, **`voltage`** | Via **`include_status`** triplet only |
 
-Older builds used **`0x02`** without a per-entry **id** byte — use the legacy branch in the codec below only if you still run old firmware.
+### Backward compatibility
+
+| Version byte | Firmware | Notes |
+|--------------|----------|-------|
+| **`0x04`** | Current | Self-describing entries with sensor_type byte. |
+| **`0x03`** | Previous | Per-entry id but positional decoding (requires PLAN sync). |
+| **`0x02`** | Older | No per-entry id. |
+
+The universal codec below handles **`0x04`**, **`0x03`** (legacy PLAN fallback), and the 4-byte legacy format.
 
 The service logs **`uplink application payload: N bytes`** before every `sendReceive`.
 
@@ -213,100 +262,153 @@ The service logs **`uplink application payload: N bytes`** before every `sendRec
 
 ### ChirpStack: what you control vs what the network adds
 
-Only the **application bytes** (the **FRMPayload** on **FPort**, e.g. your 4-byte or packed blob) are produced by this node. **You cannot strip** fields like **`deduplicationId`**, **`tenantId`**, **`rssi`**, **`gatewayId`**, **`spreadingFactor`**, etc. from “the message” in the radio sense — those are **metadata** ChirpStack (and the gateway) attach when they **store or display** the event. They are not extra bytes on your **LoRa airtime**; airtime is roughly **LoRaWAN MAC header + your payload + MIC** (plus optional port).
+Only the **application bytes** (the **FRMPayload** on **FPort**, e.g. your 4-byte or packed blob) are produced by this node. **You cannot strip** fields like **`deduplicationId`**, **`tenantId`**, **`rssi`**, **`gatewayId`**, **`spreadingFactor`**, etc. from "the message" in the radio sense — those are **metadata** ChirpStack (and the gateway) attach when they **store or display** the event. They are not extra bytes on your **LoRa airtime**; airtime is roughly **LoRaWAN MAC header + your payload + MIC** (plus optional port).
 
-To **save airtime**, shorten the **application payload** (fewer `entries` / `fields`, avoid redundant status, lower `max_bytes` and respect DR limits), use a **higher data rate** / shorter **SF** where coverage allows, and send **less often** (`uplink_interval_sec`).
+To **save airtime**, shorten the **application payload** (fewer `entries`, avoid redundant status, lower `max_bytes` and respect DR limits), use a **higher data rate** / shorter **SF** where coverage allows, and send **less often** (`uplink_interval_sec`).
 
-**ChirpStack codec — legacy 4-byte (`format: legacy`):**
+### ChirpStack codec — universal (v4 + v3 + legacy)
 
-```javascript
-function decodeUplink(input) {
-  var b = input.bytes;
-  if (b.length < 4) return { data: {} };
-  var tRaw = (b[0] << 8) | b[1];
-  var t = (tRaw & 0x8000) ? tRaw - 0x10000 : tRaw;
-  var h = (b[2] << 8) | b[3];
-  if (t === 0x7fff && h === 0xffff) return { data: { valid: false } };
-  return { data: { temperature_c: t / 100, humidity_pct: h / 100, valid: true } };
-}
-```
+**One codec for all edges.** Paste this into your ChirpStack device profile. It handles:
+- **v4** (`0x04`): self-describing entries — uses the sensor_type byte to decode.
+- **v3** (`0x03`): legacy positional — needs a `V3_PLAN` if you still have old firmware.
+- **legacy** (4 bytes): temperature + humidity only.
 
-**ChirpStack codec — packed v2 (`0x03`, with per-entry `id`):**
-
-Keep **`PLAN`** and **`LABELS`** in sync with **`config.yaml`** (`payload.entries`: same **`id`** values, same **`fields`** order). **`LABELS`** maps **numeric `id`** → a short key in the decoded object (`air`, `motion`, …). Zigbee friendly names are not sent on-air; use **`entry_id`** + **`LABELS`** to know which block is which sensor.
+The **`TYPES`** map mirrors the Sensor Type Registry. The **`LABELS`** map is optional — it gives human-friendly keys to entry IDs (e.g. `1 → 'bedroom'`). Customize `LABELS` per deployment if desired; `TYPES` must stay the same across all edges.
 
 ```javascript
 function decodeUplink(input) {
   var b = input.bytes;
+
+  // --- Legacy 4-byte (format: legacy) ---
   if (b.length === 4) {
     var tRaw = (b[0] << 8) | b[1];
     var t = (tRaw & 0x8000) ? tRaw - 0x10000 : tRaw;
-    var hRaw = (b[2] << 8) | b[3];
-    if (t === 0x7fff && hRaw === 0xffff) return { data: { valid: false } };
-    return { data: { temperature_c: t / 100, humidity_pct: hRaw / 100, valid: true } };
+    var h = (b[2] << 8) | b[3];
+    if (t === 0x7fff && h === 0xffff) return { data: { valid: false } };
+    return { data: { temperature_c: t / 100, humidity_pct: h / 100, valid: true } };
   }
-  var o = 0;
+
   if (b.length < 2) return { data: {} };
+  var o = 0;
   var ver = b[o++];
-  if (ver !== 0x03) return { data: { error: 'unknown_payload_version', ver: ver } };
   var flags = b[o++];
   var includeStatus = (flags & 1) !== 0;
 
-  var LABELS = { 1: 'air', 2: 'motion' };
-  var PLAN = [
-    { id: 1, fields: ['temperature', 'humidity'] },
-    { id: 2, fields: ['occupancy', 'illumination'] }
-  ];
+  // --- Sensor Type Registry (same on every edge) ---
+  var TYPES = {
+    0x01: { name: 'climate', fields: ['temperature', 'humidity'] },
+    0x02: { name: 'motion',  fields: ['occupancy', 'illumination'] },
+    0x03: { name: 'contact', fields: ['contact'] }
+  };
 
-  function readTemp() {
-    var tRaw = (b[o] << 8) | b[o + 1]; o += 2;
-    var t = (tRaw & 0x8000) ? tRaw - 0x10000 : tRaw;
-    return t === 0x7fff ? null : t / 100;
+  // Optional: human-friendly labels for entry IDs. Customize per deployment.
+  var LABELS = {};
+
+  // --- Field readers ---
+  function readI16() {
+    var raw = (b[o] << 8) | b[o + 1]; o += 2;
+    return (raw & 0x8000) ? raw - 0x10000 : raw;
   }
-  function readHum() {
-    var hRaw = (b[o] << 8) | b[o + 1]; o += 2;
-    return hRaw === 0xffff ? null : hRaw / 100;
+  function readU16() { var v = (b[o] << 8) | b[o + 1]; o += 2; return v; }
+  function readU8() { return b[o++]; }
+
+  function readField(fname) {
+    if (fname === 'temperature') {
+      var raw = readI16();
+      return raw === 0x7fff ? null : raw / 100;
+    }
+    if (fname === 'humidity') {
+      var raw = readU16();
+      return raw === 0xffff ? null : raw / 100;
+    }
+    if (fname === 'occupancy' || fname === 'motion') {
+      var v = readU8();
+      return v === 0xff ? null : v !== 0;
+    }
+    if (fname === 'illumination' || fname === 'brightness') {
+      var v = readU8();
+      var names = ['unknown', 'dark', 'medium', 'bright'];
+      return v < names.length ? names[v] : 'unknown';
+    }
+    if (fname === 'contact') {
+      var v = readU8();
+      return v === 0xff ? null : v !== 0;
+    }
+    return null;
   }
-  function readOcc() {
-    var v = b[o++];
-    return v === 0xff ? null : v !== 0;
-  }
-  function readIllum() {
-    var v = b[o++];
-    var names = ['unknown', 'dark', 'medium', 'bright'];
-    return v < names.length ? names[v] : 'unknown';
-  }
+
   function readStatus(row) {
-    row.linkquality = b[o++];
-    var bat = b[o++];
+    row.linkquality = readU8();
+    var bat = readU8();
     row.battery_pct = bat === 0xff ? null : bat;
-    var vRaw = (b[o] << 8) | b[o + 1]; o += 2;
+    var vRaw = readU16();
     row.voltage_mV = vRaw === 0xffff ? null : vRaw;
   }
 
+  // Map field names to decoded keys
+  var FIELD_KEYS = {
+    temperature: 'temperature_c',
+    humidity: 'humidity_pct',
+    occupancy: 'occupancy',
+    motion: 'occupancy',
+    illumination: 'illumination',
+    brightness: 'illumination',
+    contact: 'contact'
+  };
+
   var out = {};
-  for (var pi = 0; pi < PLAN.length; pi++) {
-    var step = PLAN[pi];
-    if (o >= b.length) break;
-    var eid = b[o++];
-    var key = LABELS[eid] !== undefined ? LABELS[eid] : ('id_' + eid);
-    var row = { entry_id: eid };
-    if (eid !== step.id) row._id_mismatch = true;
-    for (var fi = 0; fi < step.fields.length; fi++) {
-      var fn = step.fields[fi];
-      if (fn === 'temperature') row.temperature_c = readTemp();
-      else if (fn === 'humidity') row.humidity_pct = readHum();
-      else if (fn === 'occupancy' || fn === 'motion') row.occupancy = readOcc();
-      else if (fn === 'illumination' || fn === 'brightness') row.illumination = readIllum();
+
+  // --- v4: self-describing entries ---
+  if (ver === 0x04) {
+    while (o < b.length) {
+      var eid = readU8();
+      var stype = readU8();
+      var td = TYPES[stype];
+      if (!td) {
+        out['unknown_type_' + stype] = { entry_id: eid, error: 'unknown_sensor_type' };
+        break;
+      }
+      var key = LABELS[eid] !== undefined ? LABELS[eid] : td.name + '_' + eid;
+      var row = { entry_id: eid, sensor_type: td.name };
+      for (var fi = 0; fi < td.fields.length; fi++) {
+        var fn = td.fields[fi];
+        row[FIELD_KEYS[fn] || fn] = readField(fn);
+      }
+      if (includeStatus) readStatus(row);
+      out[key] = row;
     }
-    if (includeStatus) readStatus(row);
-    out[key] = row;
+    return { data: out };
   }
-  return { data: out };
+
+  // --- v3: legacy positional (backward compat) ---
+  if (ver === 0x03) {
+    var V3_PLAN = [
+      { id: 1, fields: ['temperature', 'humidity'] },
+      { id: 2, fields: ['occupancy', 'illumination'] }
+    ];
+    var V3_LABELS = { 1: 'air', 2: 'motion' };
+    for (var pi = 0; pi < V3_PLAN.length; pi++) {
+      var step = V3_PLAN[pi];
+      if (o >= b.length) break;
+      var eid = readU8();
+      var key = V3_LABELS[eid] !== undefined ? V3_LABELS[eid] : ('id_' + eid);
+      var row = { entry_id: eid };
+      if (eid !== step.id) row._id_mismatch = true;
+      for (var fi = 0; fi < step.fields.length; fi++) {
+        var fn = step.fields[fi];
+        row[FIELD_KEYS[fn] || fn] = readField(fn);
+      }
+      if (includeStatus) readStatus(row);
+      out[key] = row;
+    }
+    return { data: out };
+  }
+
+  return { data: { error: 'unknown_payload_version', ver: ver } };
 }
 ```
 
-If a device profile might send **both** legacy 4-byte and packed frames, use **`b.length === 4`** to pick the legacy branch (as above). Adapt to your ChirpStack **codec / function signature** version.
+If a device profile might send **both** legacy 4-byte and packed frames, the codec above handles it via `b.length === 4`.
 
 ## References
 
