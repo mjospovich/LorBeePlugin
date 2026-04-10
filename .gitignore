@@ -14,18 +14,23 @@ zigbee2mqtt/data/configuration_backup*.yaml
 data/snapshot/*.json
 
 # LoRaWAN OTAA persisted session (RadioLib nonces + session buffers)
-data/lorawan-state/
+data/lorawan-state/*
+!data/lorawan-state/.gitkeep
 
-# Node-RED runtime
+# Node-RED runtime (editor state + secrets — recreated on first container start)
 nodered/data/flows_cred.json
 nodered/data/*.backup
 nodered/data/.config*.backup
+nodered/data/.config.nodes.json
+nodered/data/.config.runtime.json
+nodered/data/.config.users.json
 
 # Duplicate / archive flows (canonical: nodered/data/flows.json)
 nodered/flows/
 
-# Mosquitto persistence
-mosquitto/data/
+# Mosquitto persistence (broker DB at runtime; directory kept via .gitkeep)
+mosquitto/data/*
+!mosquitto/data/.gitkeep
 
 # LoRaWAN OTAA secrets (see lora/chirpstack-node/keys.env.example)
 lora/chirpstack-node/keys.env

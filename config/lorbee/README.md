@@ -1,6 +1,6 @@
 # Edge static configuration (examples)
 
-Files here are **templates** you copy or reference when customizing an edge. Nothing in this folder is mounted into containers by default.
+Files here are **documentation and templates** you copy or reference when customizing an edge. **Nothing in this folder is mounted by Docker Compose** and nothing here is read automatically by the stack — it is the human-readable contract for packed LoRa payloads vs your ChirpStack codec.
 
 | File | Purpose |
 |------|---------|

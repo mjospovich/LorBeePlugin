@@ -238,7 +238,7 @@ Without the timer, right after boot run **`bash scripts/stack-after-boot.sh`** (
 | Without `make` | With `make` (optional) | Purpose |
 |----------------|-------------------------|---------|
 | `bash scripts/setup-first-run.sh` | `make setup-first-run` | Interactive **`.env`** + Zigbee2MQTT template + data dirs |
-| `bash scripts/ensure-data-dirs.sh` | `make init` | Create **`data/snapshot`**, **`data/lorawan-state`**, etc. |
+| `bash scripts/ensure-data-dirs.sh` | `make init` | Create **`data/snapshot`**, **`data/lorawan-state`**, **`mosquitto/data`**, etc. |
 | `docker compose up -d` | `make up` | Start stack (needs **`docker compose`** — see [Docker install](#1-install-git-and-docker-before-cloning)) |
 | `docker compose down` | `make down` | Stop stack |
 | `docker compose logs -f --tail 100` | `make logs` | Tail logs |

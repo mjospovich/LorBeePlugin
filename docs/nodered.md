@@ -17,7 +17,9 @@
 | `nodered/data/package.json` | Optional extra Node-RED nodes (npm); currently empty. |
 | `data/snapshot/latest.json` (repo root) | **Runtime** — last merged snapshot (gitignored); mounted at `/data/snapshot/latest.json` in the container. |
 
-`flows_cred.json` (if present) stores encrypted credentials and is gitignored.
+**Not committed (created on first `nodered` start, or when you use the editor):** `.config.nodes.json`, `.config.runtime.json`, `.config.users.json` — local editor layout, instance id, and **credential encryption secret**. They must stay private; do not paste them into issues or commits.
+
+`flows_cred.json` (if present) stores encrypted flow credentials and is gitignored.
 
 ## User ID in Docker
 

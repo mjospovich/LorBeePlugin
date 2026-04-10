@@ -30,7 +30,7 @@ Where to change behaviour for **LorBeePlugin** (this Docker Compose stack). For 
 
 ## Runtime data (do not commit)
 
-Gitignored or sensitive: **`.env`**, **`zigbee2mqtt/data/configuration.yaml`** and DB/state, **`nodered/data`** credentials backups, **`mosquitto/data`**, **`data/snapshot/*.json`**, **`lora/chirpstack-node/keys.env`**, **`data/lorawan-state/`**.
+Gitignored or sensitive: **`.env`**, **`zigbee2mqtt/data/configuration.yaml`** and DB/state, **`nodered/data/flows_cred.json`** and **`.config.*.json`** (editor/runtime secrets), **`nodered/data/*.backup`**, **`mosquitto/data/*`** (except **`.gitkeep`**), **`data/snapshot/*.json`**, **`lora/chirpstack-node/keys.env`**, **`data/lorawan-state/*`** (except **`.gitkeep`**).
 
 ## Related: LorBeeOS
 
