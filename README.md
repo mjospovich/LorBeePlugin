@@ -43,6 +43,40 @@ Most people skip the appendix and jump straight to **Install on the Pi**.
 
 ---
 
+## Reference hardware — Pi Zero 2W + RFM9x (test setup)
+
+Photos below are from a **reference bench setup** (USB Zigbee coordinator + optional **RFM9x** LoRa module on **SPI0**). The wiring matches the **defaults** in this repo: **`lora/chirpstack-node/config.example.yaml`** uses **`spi_channel: 1`** (`/dev/spidev0.1`), **`cs: 17`**, **`dio0: 22`**, **`rst: 25`**. The LoRa section of **`bash scripts/setup-first-run.sh`** uses the same numbers. If your breakout uses other GPIOs, set **`RFM_SPI_CHANNEL`**, **`RFM_PIN_CS`**, **`RFM_PIN_DIO0`**, **`RFM_PIN_RST`** in **`lora/chirpstack-node/keys.env`** or edit **`config.yaml`** — see **[lora/README.md](lora/README.md)** (SPI **must** stay on **MOSI/MISO/SCK**; **CS** cannot be BCM **7** or **8**).
+
+**Overview** — Pi Zero 2W with dongle and LoRa board:
+
+![Pi Zero 2W test setup with Zigbee USB dongle and RFM9x](assets/rpi-zero-setup.JPG)
+
+**Close-ups** (same wiring as the table; Pi header ↔ module):
+
+| Raspberry Pi Zero 2W (GPIO / SPI) | RFM9x breakout |
+|:---:|:---:|
+| ![Close-up: Raspberry Pi Zero 2W wiring to RFM9x](assets/rpi-close.JPG) | ![Close-up: RFM9x module pin side](assets/lora-radio-close.JPG) |
+
+> [!IMPORTANT]
+> Connect RFM9x **VIN** only to the Pi’s **3.3 V**. **Do not use 5 V** — it can damage the module.
+
+### RFM9x ↔ Raspberry Pi Zero wiring
+
+| RFM9x pin | Raspberry Pi Zero | Description |
+|-----------|-------------------|-------------|
+| **VIN** | **3.3 V** | Power (3.3 V only) |
+| **GND** | **GND** | Ground |
+| **G0** | **GPIO 22** (BCM 22) | DIO0 — interrupt to the CPU |
+| **SCK** | **GPIO 11** (BCM 11) | SPI0 clock (SCLK) |
+| **MISO** | **GPIO 9** (BCM 9) | SPI0 MISO |
+| **MOSI** | **GPIO 10** (BCM 10) | SPI0 MOSI |
+| **CS** | **GPIO 17** (BCM 17) | Chip select (bit-banged; not the kernel CE0/CE1 pins) |
+| **RST** | **GPIO 25** (BCM 25) | Radio reset |
+
+Enable **SPI** in **`dietpi-config`** before first boot of the stack with LoRa — **[docs/dietpi-spi.md](docs/dietpi-spi.md)**.
+
+---
+
 ## Install on the Pi (DietPi ready)
 
 Do these on the Pi (SSH or keyboard + monitor). You need **internet** and a user that can run **`docker`** (often after logging out and back in once Docker is installed).
