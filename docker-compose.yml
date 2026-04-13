@@ -25,6 +25,8 @@ services:
       start_period: 10s
 
   # After Pi reboot: set ZIGBEE_SERIAL_DEVICE=/dev/serial/by-id/... in .env (not plain ttyUSB0).
+  # The by-id path is bind-mounted so zigbee2mqtt sees the correct device even when
+  # ttyUSB numbering changes (e.g. after adding SPS30 to the same USB hub).
   zigbee2mqtt:
     container_name: zigbee2mqtt
     image: koenkk/zigbee2mqtt:latest
@@ -33,11 +35,11 @@ services:
     network_mode: host
     environment:
       - TZ=${TZ:-Europe/Zagreb}
-    devices:
-      - ${ZIGBEE_SERIAL_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0
+      - ZIGBEE_SERIAL_DEVICE=${ZIGBEE_SERIAL_DEVICE:-/dev/ttyUSB0}
     volumes:
       - ${LORBEE_STACK_ROOT:-.}/zigbee2mqtt/data:/app/data
       - /run/udev:/run/udev:ro
+      - /dev/serial:/dev/serial:ro
     group_add:
       - dialout
     depends_on:
