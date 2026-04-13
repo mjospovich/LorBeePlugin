@@ -146,6 +146,16 @@ static bool encode_data_field(const std::string& fname, const nlohmann::json& de
     append_u16_be(buf, (uint16_t)v);
     return true;
   }
+  if(fname == "pm1_0" || fname == "pm2_5" || fname == "pm4_0" || fname == "pm10") {
+    if(!dev.contains(fname) || !dev[fname].is_number()) {
+      append_u16_be(buf, 0xffff);
+      return true;
+    }
+    long v = std::lround(dev[fname].get<double>() * 10.0);
+    v = std::max(0L, std::min(v, 65534L));
+    append_u16_be(buf, (uint16_t)v);
+    return true;
+  }
   err = "unknown payload field name: " + fname;
   return false;
 }

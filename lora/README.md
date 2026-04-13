@@ -193,10 +193,11 @@ The registry is the **single contract** between every edge encoder and the centr
 | **`0x01`** | **`climate`** | `temperature` (int16 BE, °C×100) + `humidity` (uint16 BE, %×100) | 4 |
 | **`0x02`** | **`motion`** | `occupancy` (uint8, 0/1/0xFF) + `illumination` (uint8, 0–3) | 2 |
 | **`0x03`** | **`contact`** | `contact` (uint8, 0/1/0xFF) | 1 |
+| **`0x04`** | **`air_quality`** | `pm1_0` + `pm2_5` + `pm4_0` + `pm10` (uint16 BE each, µg/m³×10) | 8 |
 
 **To add a new sensor type:**
 
-1. Pick the next available type ID (e.g. `0x04`).
+1. Pick the next available type ID (e.g. `0x05`).
 2. **C++ encoder:** add the type to `SensorType` enum in `config.hpp` and to `build_registry()` in `config_yaml.cpp`. Add field encoding in `payload_builder.cpp` if needed.
 3. **ChirpStack decoder:** add the type to the `TYPES` map and its read function in the universal codec below.
 4. **Documentation:** add a row to this table and to `config/lorbee/payload.manifest.example.yaml`.
@@ -242,6 +243,7 @@ payload:
 | **`occupancy`** / **`motion`** | `uint8` 0/1; missing → `0xFF` |
 | **`illumination`** / **`brightness`** | `uint8` 0 unknown, 1 dark, 2 medium, 3 bright |
 | **`contact`** | `uint8` 0/1; missing → `0xFF` |
+| **`pm1_0`**, **`pm2_5`**, **`pm4_0`**, **`pm10`** | `uint16` BE, µg/m³×10; missing → `0xFFFF` |
 | **`linkquality`**, **`battery`**, **`voltage`** | Via **`include_status`** triplet only |
 
 ### Backward compatibility
@@ -298,7 +300,8 @@ function decodeUplink(input) {
   var TYPES = {
     0x01: { name: 'climate', fields: ['temperature', 'humidity'] },
     0x02: { name: 'motion',  fields: ['occupancy', 'illumination'] },
-    0x03: { name: 'contact', fields: ['contact'] }
+    0x03: { name: 'contact', fields: ['contact'] },
+    0x04: { name: 'air_quality', fields: ['pm1_0', 'pm2_5', 'pm4_0', 'pm10'] }
   };
 
   // Optional: human-friendly labels for entry IDs. Customize per deployment.
@@ -334,6 +337,10 @@ function decodeUplink(input) {
       var v = readU8();
       return v === 0xff ? null : v !== 0;
     }
+    if (fname === 'pm1_0' || fname === 'pm2_5' || fname === 'pm4_0' || fname === 'pm10') {
+      var raw = readU16();
+      return raw === 0xffff ? null : raw / 10;
+    }
     return null;
   }
 
@@ -353,7 +360,11 @@ function decodeUplink(input) {
     motion: 'occupancy',
     illumination: 'illumination',
     brightness: 'illumination',
-    contact: 'contact'
+    contact: 'contact',
+    pm1_0: 'pm1_0_ugm3',
+    pm2_5: 'pm2_5_ugm3',
+    pm4_0: 'pm4_0_ugm3',
+    pm10: 'pm10_ugm3'
   };
 
   var out = {};

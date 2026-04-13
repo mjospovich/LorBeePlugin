@@ -35,6 +35,11 @@ else
   echo "lorbee: skipping post-up zigbee2mqtt restart (set ZIGBEE2MQTT_POST_UP_RESTART=1 to enable)"
 fi
 
+if [[ "${COMPOSE_PROFILES:-}" == *sps30* ]] || [[ "${LORBEE_SPS30_ON_BOOT:-0}" == "1" ]]; then
+  echo "lorbee: docker compose --profile sps30 up -d sps30-collector"
+  docker compose --profile sps30 up -d sps30-collector || true
+fi
+
 if [[ "${COMPOSE_PROFILES:-}" == *lora* ]] || [[ "${LORBEE_LORA_ON_BOOT:-0}" == "1" ]]; then
   echo "lorbee: docker compose --profile lora up -d chirpstack-lora-node"
   docker compose --profile lora up -d chirpstack-lora-node || true

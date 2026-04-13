@@ -104,6 +104,43 @@
         ]
     },
     {
+        "id": "mqtt_in_sps30",
+        "type": "mqtt in",
+        "z": "tab_snapshot",
+        "name": "sps30/raw",
+        "topic": "sps30/raw",
+        "qos": "0",
+        "datatype": "utf8",
+        "broker": "mqtt_broker_1",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 120,
+        "y": 440,
+        "wires": [["func_merge_sps30"]]
+    },
+    {
+        "id": "func_merge_sps30",
+        "type": "function",
+        "z": "tab_snapshot",
+        "name": "Merge SPS30 into snapshot",
+        "func": "function applyEdgeMeta(snap) {\n    const raw = env.get('EDGE_ID') || 'default';\n    const edge_id = String(raw).replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 64) || 'default';\n    snap.edge_id = edge_id;\n    snap.source = 'lorbee.edge-snapshot';\n    return edge_id;\n}\nlet payload = msg.payload;\nif (typeof payload === 'string') {\n    try { payload = JSON.parse(payload); } catch (e) { return null; }\n}\nif (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return null;\nlet snap = global.get('sensor_snapshot');\nif (!snap || typeof snap !== 'object') {\n    snap = { schema_version: 2, source: 'lorbee.edge-snapshot', edge_id: null, updated_at: null, devices: {}, device_labels: {} };\n}\nsnap.devices['sps30'] = payload;\nsnap.updated_at = new Date().toISOString();\nsnap.schema_version = 2;\nconst edgeId = applyEdgeMeta(snap);\nglobal.set('sensor_snapshot', snap);\nconst t1 = 'lorbee/edges/' + edgeId + '/sensors/latest';\nreturn [\n    { payload: snap, topic: t1 },\n    { payload: snap, topic: 'edge/sensors/latest' },\n    { payload: JSON.stringify(snap, null, 2) }\n];",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 370,
+        "y": 440,
+        "wires": [
+            ["mqtt_out_lorbee_snap"],
+            ["mqtt_out_legacy_snap"],
+            ["file_edge_snap"]
+        ]
+    },
+    {
         "id": "mqtt_out_lorbee_snap",
         "type": "mqtt out",
         "z": "tab_snapshot",

@@ -3,9 +3,10 @@
 # After changing entries, update the ChirpStack codec if using v3; v4 is self-describing.
 #
 # Sensor Type Registry (v4 — shared contract between encoder and decoder):
-#   Type 0x01  climate  → temperature (i16 BE, °C×100) + humidity (u16 BE, %×100)  = 4 bytes
-#   Type 0x02  motion   → occupancy (u8) + illumination (u8)                        = 2 bytes
-#   Type 0x03  contact  → contact (u8)                                              = 1 byte
+#   Type 0x01  climate      → temperature (i16 BE, °C×100) + humidity (u16 BE, %×100)        = 4 bytes
+#   Type 0x02  motion       → occupancy (u8) + illumination (u8)                              = 2 bytes
+#   Type 0x03  contact      → contact (u8)                                                    = 1 byte
+#   Type 0x04  air_quality  → pm1_0 + pm2_5 + pm4_0 + pm10 (u16 BE each, µg/m³×10)          = 8 bytes
 #
 # See lora/README.md § "Sensor Type Registry" for the full specification.
 # The ChirpStack universal codec uses the same TYPES map to decode any edge.
@@ -14,7 +15,8 @@ format: packed
 include_status: false
 max_bytes: 222
 
-# Ordered uplink rows: device = IEEE key in snapshot.devices (from Zigbee2MQTT / Node-RED).
+# Ordered uplink rows: device = IEEE key in snapshot.devices (from Zigbee2MQTT / Node-RED),
+# or a stable string key for non-Zigbee sensors (e.g. "sps30").
 # `type` selects from the Sensor Type Registry — fields are determined automatically.
 entries:
   - id: 1
@@ -23,3 +25,6 @@ entries:
   - id: 2
     device: "0x8899aabbccddeeff"
     type: motion
+  - id: 3
+    device: "sps30"
+    type: air_quality

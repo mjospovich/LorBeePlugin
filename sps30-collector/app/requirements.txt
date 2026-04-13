@@ -1,0 +1,4 @@
+paho-mqtt==2.1.0
+sensirion-uart-sps30==1.0.0
+sensirion-shdlc-driver
+sensirion-driver-adapters

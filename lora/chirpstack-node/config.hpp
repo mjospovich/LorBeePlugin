@@ -33,9 +33,10 @@ enum class PayloadFormat { Legacy, Packed };
 // See lora/README.md § "Sensor Type Registry".
 // ---------------------------------------------------------------------------
 enum class SensorType : uint8_t {
-  Climate = 0x01,   // temperature (i16 BE) + humidity (u16 BE)  — 4 data bytes
-  Motion  = 0x02,   // occupancy (u8)       + illumination (u8)  — 2 data bytes
-  Contact = 0x03,   // contact (u8)                              — 1 data byte
+  Climate    = 0x01,  // temperature (i16 BE) + humidity (u16 BE)      — 4 data bytes
+  Motion     = 0x02,  // occupancy (u8)       + illumination (u8)      — 2 data bytes
+  Contact    = 0x03,  // contact (u8)                                  — 1 data byte
+  AirQuality = 0x04,  // pm1_0 + pm2_5 + pm4_0 + pm10 (u16 BE each)  — 8 data bytes
 };
 
 struct SensorTypeDef {

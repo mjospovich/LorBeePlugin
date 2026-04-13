@@ -8,6 +8,7 @@ cd "$ROOT"
 
 INTERACTIVE=1
 WITH_LORA=0
+WITH_SPS30=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
   -y | --yes)
@@ -18,6 +19,10 @@ while [[ $# -gt 0 ]]; do
     WITH_LORA=1
     shift
     ;;
+  --with-sps30)
+    WITH_SPS30=1
+    shift
+    ;;
   -h | --help)
     cat <<'EOF'
 LorBeePlugin — first-run setup
@@ -25,11 +30,12 @@ LorBeePlugin — first-run setup
   bash scripts/setup-first-run.sh              Interactive prompts (default)
   bash scripts/setup-first-run.sh --yes        Non-interactive: Zigbee + core .env only
   bash scripts/setup-first-run.sh --yes --with-lora   Non-interactive + default LoRa pins + COMPOSE_PROFILES=lora
+  bash scripts/setup-first-run.sh --yes --with-sps30  Non-interactive + auto-detect SPS30 serial
   make setup-first-run                         Same as the first form (needs: apt install make)
 
-Creates or updates .env, optional LoRa pin/region keys in keys.env, copies zigbee2mqtt
-configuration template if missing, optional Zigbee channel/adapter in configuration.yaml,
-runs ensure-data-dirs. Does not start Docker.
+Creates or updates .env, optional LoRa pin/region keys in keys.env, optional SPS30 serial
+device, copies zigbee2mqtt configuration template if missing, optional Zigbee channel/adapter
+in configuration.yaml, runs ensure-data-dirs. Does not start Docker.
 
 Non-interactive Zigbee RF: set LORBEE_ZIGBEE_CHANNEL=11-26 and/or LORBEE_ZIGBEE_ADAPTER
 (zstack|ember|deconz|zigate) before  --yes .
@@ -54,6 +60,9 @@ if [[ -n "${LORBEE_SETUP_NONINTERACTIVE:-}" ]]; then
 fi
 if [[ -n "${LORBEE_SETUP_WITH_LORA:-}" ]]; then
   WITH_LORA=1
+fi
+if [[ -n "${LORBEE_SETUP_WITH_SPS30:-}" ]]; then
+  WITH_SPS30=1
 fi
 
 say() { printf '%s\n' "$*"; }
@@ -189,6 +198,39 @@ pick_zigbee_device() {
     return 0
   fi
   say "Multiple serial devices found. Pick one:" >&2
+  local i=1
+  for p in "${devs[@]}"; do
+    printf '  %d) %s\n' "$i" "$p" >&2
+    ((i++)) || true
+  done
+  read -r -p "Enter number (1-$((${#devs[@]}))): " pick || true
+  if [[ "${pick:-}" =~ ^[0-9]+$ ]] && ((pick >= 1 && pick <= ${#devs[@]})); then
+    printf '%s\n' "${devs[$((pick - 1))]}"
+    return 0
+  fi
+  return 1
+}
+
+pick_sps30_device() {
+  local byid="/dev/serial/by-id"
+  local -a devs=()
+  local p
+  shopt -s nullglob
+  for p in "$byid"/usb-*Sensirion* "$byid"/usb-*SPS30* "$byid"/usb-*sps30*; do
+    [[ -e "$p" ]] || continue
+    devs+=("$p")
+  done
+  shopt -u nullglob
+  if ((${#devs[@]} == 0)); then
+    say "" >&2
+    say "No Sensirion serial device found under $byid." >&2
+    return 1
+  fi
+  if ((${#devs[@]} == 1)); then
+    printf '%s\n' "${devs[0]}"
+    return 0
+  fi
+  say "Multiple Sensirion serial devices found. Pick one:" >&2
   local i=1
   for p in "${devs[@]}"; do
     printf '  %d) %s\n' "$i" "$p" >&2
@@ -476,10 +518,108 @@ if [[ "$LORA_DO" -eq 1 ]]; then
     fi
 
     if [[ "$LORA_COMPOSE" -eq 1 ]]; then
-      upsert_env_var "$ENV_FILE" "COMPOSE_PROFILES" "lora"
-      say "Set COMPOSE_PROFILES=lora in .env"
+      CUR_PROFILES=""
+      if grep -qE '^COMPOSE_PROFILES=' "$ENV_FILE" 2>/dev/null; then
+        CUR_PROFILES="$(grep -E '^COMPOSE_PROFILES=' "$ENV_FILE" | tail -1 | cut -d= -f2-)"
+      fi
+      if [[ "$CUR_PROFILES" != *lora* ]]; then
+        if [[ -n "$CUR_PROFILES" ]]; then
+          upsert_env_var "$ENV_FILE" "COMPOSE_PROFILES" "${CUR_PROFILES},lora"
+        else
+          upsert_env_var "$ENV_FILE" "COMPOSE_PROFILES" "lora"
+        fi
+      fi
+      say "Added lora to COMPOSE_PROFILES in .env"
     fi
   fi
+fi
+
+# --- Optional SPS30 particulate matter sensor (UART/USB) ---
+SPS30_DO=0
+SPS30_COMPOSE=0
+
+if [[ "$INTERACTIVE" -eq 1 ]]; then
+  say ""
+  if yes_no "Configure optional SPS30 particulate matter sensor (USB/UART)?" n; then
+    SPS30_DO=1
+  fi
+elif [[ "$WITH_SPS30" -eq 1 ]]; then
+  SPS30_DO=1
+  SPS30_COMPOSE=1
+fi
+
+if [[ "$SPS30_DO" -eq 1 ]]; then
+  say ""
+  say "SPS30: connect via the Sensirion USB-UART cable. The sensor should appear under /dev/serial/by-id/."
+
+  SPS30_DEV=""
+  if [[ "$INTERACTIVE" -eq 1 ]]; then
+    say "  1) Auto-detect Sensirion device (recommended if cable is plugged in)"
+    say "  2) Type a path manually (e.g. /dev/serial/by-id/usb-Sensirion_...)"
+    say "  3) Skip — set SPS30_SERIAL_DEVICE in .env later"
+    read -r -p "Choose 1/2/3 [1]: " sps30choice || true
+    sps30choice="${sps30choice:-1}"
+  else
+    sps30choice=1
+  fi
+
+  case "${sps30choice:-1}" in
+  1)
+    if SPS30_DEV="$(pick_sps30_device)" && [[ -n "$SPS30_DEV" ]]; then
+      upsert_env_var "$ENV_FILE" "SPS30_SERIAL_DEVICE" "$SPS30_DEV"
+      say "Set SPS30_SERIAL_DEVICE=$SPS30_DEV"
+    else
+      say "Could not auto-detect SPS30. Set SPS30_SERIAL_DEVICE in .env manually."
+    fi
+    ;;
+  2)
+    if [[ "$INTERACTIVE" -eq 1 ]]; then
+      SPS30_DEV="$(prompt "Full host path to SPS30 serial device" "")"
+      if [[ -n "$SPS30_DEV" && -e "$SPS30_DEV" ]]; then
+        upsert_env_var "$ENV_FILE" "SPS30_SERIAL_DEVICE" "$SPS30_DEV"
+        say "Set SPS30_SERIAL_DEVICE=$SPS30_DEV"
+      else
+        say "Path missing or empty — not updating SPS30_SERIAL_DEVICE." >&2
+      fi
+    fi
+    ;;
+  3)
+    say "Skipped — set SPS30_SERIAL_DEVICE in .env when ready."
+    ;;
+  esac
+
+  if [[ "$INTERACTIVE" -eq 1 ]]; then
+    SPS30_INT="$(prompt_int "SPS30 read interval (seconds, min 10)" 10 3600 30)"
+    upsert_env_var "$ENV_FILE" "SPS30_INTERVAL" "$SPS30_INT"
+    say "Set SPS30_INTERVAL=$SPS30_INT"
+  fi
+
+  if [[ "$INTERACTIVE" -eq 1 ]]; then
+    say ""
+    if yes_no "Add sps30 to COMPOSE_PROFILES so the SPS30 container starts with the main stack?" y; then
+      SPS30_COMPOSE=1
+    fi
+  fi
+
+  if [[ "$SPS30_COMPOSE" -eq 1 ]]; then
+    CUR_PROFILES=""
+    if grep -qE '^COMPOSE_PROFILES=' "$ENV_FILE" 2>/dev/null; then
+      CUR_PROFILES="$(grep -E '^COMPOSE_PROFILES=' "$ENV_FILE" | tail -1 | cut -d= -f2-)"
+    fi
+    if [[ "$CUR_PROFILES" != *sps30* ]]; then
+      if [[ -n "$CUR_PROFILES" ]]; then
+        upsert_env_var "$ENV_FILE" "COMPOSE_PROFILES" "${CUR_PROFILES},sps30"
+      else
+        upsert_env_var "$ENV_FILE" "COMPOSE_PROFILES" "sps30"
+      fi
+    fi
+    say "Added sps30 to COMPOSE_PROFILES in .env"
+  fi
+
+  say ""
+  say "SPS30: build once on the Pi:"
+  say "  docker compose --profile sps30 build sps30-collector"
+  say "  docker compose --profile sps30 up -d sps30-collector"
 fi
 
 bash "$ROOT/scripts/ensure-data-dirs.sh"
@@ -496,6 +636,12 @@ if [[ "$LORA_DO" -eq 1 ]]; then
   say "  docker compose --profile lora build chirpstack-lora-node"
   say "  docker compose --profile lora up -d chirpstack-lora-node"
   say "Docs: lora/README.md"
+fi
+if [[ "$SPS30_DO" -eq 1 ]]; then
+  say ""
+  say "SPS30: build and start:"
+  say "  docker compose --profile sps30 build sps30-collector"
+  say "  docker compose --profile sps30 up -d sps30-collector"
 fi
 say ""
 say "Docs: README.md, docs/configuration-map.md"

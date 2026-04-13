@@ -60,6 +60,30 @@ services:
       mosquitto:
         condition: service_healthy
 
+  # Optional: SPS30 particulate matter sensor (UART/USB). Enable with: docker compose --profile sps30 up -d
+  sps30-collector:
+    profiles: ["sps30"]
+    container_name: sps30-collector
+    build:
+      context: ${LORBEE_STACK_ROOT:-.}/sps30-collector
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - TZ=${TZ:-Europe/Zagreb}
+      - SPS30_SERIAL_PORT=${SPS30_SERIAL_DEVICE:-/dev/ttyUSB0}
+      - MQTT_BROKER=localhost
+      - MQTT_PORT=1883
+      - SPS30_MQTT_TOPIC=${SPS30_MQTT_TOPIC:-sps30/raw}
+      - SPS30_INTERVAL=${SPS30_INTERVAL:-30}
+    devices:
+      - ${SPS30_SERIAL_DEVICE:-/dev/ttyUSB0}:${SPS30_SERIAL_DEVICE:-/dev/ttyUSB0}
+    group_add:
+      - dialout
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+
   # Optional: LoRaWAN OTAA node (RFM9x + SPI). Enable with: docker compose --profile lora up -d
   chirpstack-lora-node:
     profiles: ["lora"]
