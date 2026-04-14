@@ -22,23 +22,28 @@ WORKDIR /opt/chirpstack-node
 # Our stubs compile to empty .o; the final link fails (no main) but deps are built.
 COPY CMakeLists.txt ./
 RUN touch main.cpp config.hpp config_yaml.cpp snapshot.hpp snapshot.cpp \
-    payload_builder.hpp payload_builder.cpp lora_state.hpp lora_state.cpp config.yaml \
+    payload_builder.hpp payload_builder.cpp lora_state.hpp lora_state.cpp \
+    downlink_handler.hpp downlink_handler.cpp config.yaml \
     && mkdir build && cd build \
     && cmake .. -DRADIOLIB_ROOT=/opt/RadioLib \
     && cmake --build . -j2 || true
 
 # --- Application layer (only this rebuilds on source changes — seconds, not minutes) ---
 COPY main.cpp config.hpp config_yaml.cpp snapshot.hpp snapshot.cpp \
-    payload_builder.hpp payload_builder.cpp lora_state.hpp lora_state.cpp config.yaml ./
+    payload_builder.hpp payload_builder.cpp lora_state.hpp lora_state.cpp \
+    downlink_handler.hpp downlink_handler.cpp config.yaml ./
 RUN touch main.cpp config.hpp config_yaml.cpp snapshot.hpp snapshot.cpp \
-    payload_builder.hpp payload_builder.cpp lora_state.hpp lora_state.cpp
+    payload_builder.hpp payload_builder.cpp lora_state.hpp lora_state.cpp \
+    downlink_handler.hpp downlink_handler.cpp
 RUN mkdir -p /etc/lora && cp config.yaml /etc/lora/config.yaml
 RUN cd build && cmake --build . -j2
 
 FROM debian:bookworm-slim
 
 # Must match the soname linked by the builder (bookworm: libyaml-cpp0.7, not 0.8).
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libyaml-cpp0.7 \
+# mosquitto-clients: downlink commands publish to local Mosquitto via mosquitto_pub.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates libyaml-cpp0.7 mosquitto-clients \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/lib/liblgpio.so* /usr/local/lib/

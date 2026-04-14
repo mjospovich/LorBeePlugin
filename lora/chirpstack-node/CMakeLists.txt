@@ -28,6 +28,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
-add_executable(lorawan-node main.cpp config_yaml.cpp snapshot.cpp payload_builder.cpp lora_state.cpp)
+add_executable(lorawan-node main.cpp config_yaml.cpp snapshot.cpp payload_builder.cpp lora_state.cpp downlink_handler.cpp)
 target_link_libraries(lorawan-node PRIVATE RadioLib lgpio pthread yaml-cpp nlohmann_json::nlohmann_json)
 target_compile_options(lorawan-node PRIVATE -Wall -Wextra)

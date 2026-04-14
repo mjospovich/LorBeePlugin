@@ -5,6 +5,7 @@
  */
 
 #include "config.hpp"
+#include "downlink_handler.hpp"
 #include "lora_state.hpp"
 #include "payload_builder.hpp"
 #include "snapshot.hpp"
@@ -183,12 +184,24 @@ int main() {
   }
 
   const LoRaWANBand_t* band = band_from_region_name(cfg.lorawan.region.c_str());
-  uint32_t uplink_sec = cfg.lorawan.uplink_interval_sec;
+
+  RuntimeState rt_state;
+  rt_state.uplink_interval_sec = cfg.lorawan.uplink_interval_sec;
+  if(const char* e = std::getenv("DOWNLINK_CMD_DIR")) {
+    if(e[0]) { rt_state.command_out_dir = e; }
+  }
+  if(const char* e = std::getenv("DOWNLINK_MQTT_HOST")) {
+    if(e[0]) { rt_state.mqtt_host = e; }
+  }
+  if(const char* e = std::getenv("DOWNLINK_MQTT_PORT")) {
+    if(e[0]) { rt_state.mqtt_port = (uint16_t)std::atoi(e); }
+  }
 
   std::fprintf(stderr,
       "[lorawan-node] SPI CE%u CS=GPIO%u DIO0=GPIO%u RST=GPIO%u region=%s uplink=%us\n",
       (unsigned)cfg.hw.spi_channel, (unsigned)cfg.hw.pin_cs, (unsigned)cfg.hw.pin_dio0,
-      (unsigned)cfg.hw.pin_rst, cfg.lorawan.region.c_str(), (unsigned)uplink_sec);
+      (unsigned)cfg.hw.pin_rst, cfg.lorawan.region.c_str(),
+      (unsigned)rt_state.uplink_interval_sec);
 
   PiHal hal(cfg.hw.spi_channel);
   Module mod(&hal, cfg.hw.pin_cs, cfg.hw.pin_dio0, cfg.hw.pin_rst, RADIOLIB_NC);
@@ -225,9 +238,11 @@ int main() {
   }
 
   std::fprintf(stderr,
-      "[lorawan-node] joined; uplinks every %u s from snapshot %s (payload format=%s)\n",
-      (unsigned)uplink_sec, cfg.snapshot.path.c_str(),
-      cfg.payload.format == PayloadFormat::Packed ? "packed" : "legacy");
+      "[lorawan-node] joined; uplinks every %u s from snapshot %s (payload format=%s, "
+      "downlink fPort=%u)\n",
+      (unsigned)rt_state.uplink_interval_sec, cfg.snapshot.path.c_str(),
+      cfg.payload.format == PayloadFormat::Packed ? "packed" : "legacy",
+      (unsigned)DOWNLINK_CMD_FPORT);
 
   {
     uint32_t grace_ms = startup_grace_ms_from_env();
@@ -244,6 +259,11 @@ int main() {
   for(;;) {
     int16_t st = RADIOLIB_ERR_NONE;
     bool skipped_uplink = false;
+
+    uint8_t dl_buf[256];
+    size_t dl_len = 0;
+    LoRaWANEvent_t evt_down = {};
+
     if(cfg.payload.format == PayloadFormat::Packed) {
       nlohmann::json snapj;
       std::string jerr;
@@ -257,13 +277,22 @@ int main() {
           std::fprintf(stderr, "[lorawan-node] packed payload: %s (skip uplink)\n", perr.c_str());
           skipped_uplink = true;
         } else {
+          if(rt_state.last_result.valid && payload.size() + 2 <= cfg.payload.max_bytes
+              && payload.size() >= 2) {
+            payload[1] |= FLAG_HAS_ACK;
+            uint8_t ack_status = rt_state.last_result.success ? 0x01 : 0x00;
+            payload.insert(payload.begin() + 2,
+                {rt_state.last_result.cmd_id, ack_status});
+            std::fprintf(stderr, "[lorawan-node] uplink ACK: cmd=0x%02x status=%u\n",
+                rt_state.last_result.cmd_id, (unsigned)ack_status);
+            rt_state.last_result.valid = false;
+          }
           std::fprintf(stderr, "[lorawan-node] uplink application payload: %zu bytes\n", payload.size());
-          st = node.sendReceive(payload.data(), (size_t)payload.size());
+          st = node.sendReceive(payload.data(), (size_t)payload.size(), 1,
+              dl_buf, &dl_len, false, nullptr, &evt_down);
         }
       }
     } else {
-      // Legacy: 4 bytes BE — int16 temp (°C * 100), uint16 humidity (% * 100).
-      // Invalid/missing: temp 0x7FFF, humidity 0xFFFF.
       uint8_t payload[4];
       SnapshotReadout snap = read_snapshot(cfg);
       int16_t tcenti;
@@ -284,16 +313,21 @@ int main() {
       payload[2] = (uint8_t)((hcenti >> 8) & 0xff);
       payload[3] = (uint8_t)(hcenti & 0xff);
       std::fprintf(stderr, "[lorawan-node] uplink application payload: %zu bytes\n", sizeof(payload));
-      st = node.sendReceive(payload, sizeof(payload));
+      st = node.sendReceive(payload, sizeof(payload), 1,
+          dl_buf, &dl_len, false, nullptr, &evt_down);
     }
     if(st < RADIOLIB_ERR_NONE) {
       std::fprintf(stderr, "sendReceive error: %d (%s)\n", (int)st, state_str(st));
     } else if(st > 0) {
-      std::fprintf(stderr, "downlink in RX window %d\n", (int)st);
+      std::fprintf(stderr, "[lorawan-node] downlink: RX%d %zu bytes fPort=%u\n",
+          (int)st, dl_len, (unsigned)evt_down.fPort);
+      if(dl_len > 0) {
+        handle_downlink(dl_buf, dl_len, evt_down.fPort, rt_state);
+      }
     }
     lorawan_save_after_uplink(node);
 
-    uint32_t wait_ms = skipped_uplink ? snap_retry_ms : (uplink_sec * 1000UL);
+    uint32_t wait_ms = skipped_uplink ? snap_retry_ms : (rt_state.uplink_interval_sec * 1000UL);
     if(skipped_uplink) {
       std::fprintf(stderr,
           "[lorawan-node] retry snapshot in %u s (LORAWAN_SNAPSHOT_RETRY_SEC)\n",

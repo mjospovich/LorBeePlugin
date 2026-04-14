@@ -295,6 +295,7 @@ function decodeUplink(input) {
   var ver = b[o++];
   var flags = b[o++];
   var includeStatus = (flags & 1) !== 0;
+  var hasAck = (flags & 2) !== 0;
 
   // --- Sensor Type Registry (same on every edge) ---
   var TYPES = {
@@ -371,6 +372,11 @@ function decodeUplink(input) {
 
   // --- v4: self-describing entries ---
   if (ver === 0x04) {
+    if (hasAck && o + 2 <= b.length) {
+      var ackCmd = readU8();
+      var ackOk = readU8();
+      out._ack = { cmd_id: ackCmd, success: ackOk !== 0 };
+    }
     while (o < b.length) {
       var eid = readU8();
       var stype = readU8();
@@ -420,6 +426,124 @@ function decodeUplink(input) {
 ```
 
 If a device profile might send **both** legacy 4-byte and packed frames, the codec above handles it via `b.length === 4`.
+
+## Downlink Command Protocol
+
+The LoRa node can receive **downlink** commands from ChirpStack during the Class-A receive windows (RX1/RX2) that open after every uplink. This allows remote configuration of edge devices from a central dashboard.
+
+### How it works
+
+1. **Central** (ChirpStack on RPi 5) queues a downlink for a specific device.
+2. **Next uplink cycle** (≤ `uplink_interval_sec`), the device transmits and opens RX windows.
+3. ChirpStack delivers the queued downlink during RX1 or RX2.
+4. The firmware parses the command and executes it locally.
+5. The **next uplink** includes an **ACK** (command ID + success/fail) so the central side knows the result.
+
+Class A means the device **only listens after sending** — no continuous power draw. Worst-case delivery latency equals the uplink interval (default 300 s).
+
+### FPort
+
+All downlink commands use **fPort 10** (`DOWNLINK_CMD_FPORT`). Downlinks on other fPorts are logged and ignored.
+
+### Downlink payload format
+
+| Byte | Field |
+|------|-------|
+| 0 | Command ID |
+| 1–N | Command-specific payload |
+
+### Command registry
+
+| Cmd ID | Name | Payload | Description |
+|--------|------|---------|-------------|
+| `0x01` | **Ping** | *(none)* | Edge logs `PONG`. Confirms the downlink path works. |
+| `0x02` | **Set uplink interval** | `u16 BE` (seconds) | Changes the uplink interval at runtime (clamped 30–3600 s). Takes effect on the **next** sleep cycle. Runtime only — container restart reloads config. |
+| `0x03` | **Permit Zigbee join** | `u8` (duration in seconds, 0 = disable) | Publishes to `zigbee2mqtt/bridge/request/permit_join` via local MQTT. Also writes audit log to `/data/downlink-commands/latest.json`. |
+
+Unknown command IDs are logged with their hex value and ignored.
+
+### Uplink ACK (application-level)
+
+After processing a downlink command, the **next packed uplink** includes an ACK block so the central decoder (and any dashboard) can confirm execution.
+
+**Packed v4 flags byte** (byte 1):
+
+| Bit | Name | Meaning |
+|-----|------|---------|
+| 0 | `include_status` | Per-entry linkquality/battery/voltage (existing) |
+| 1 | `has_ack` | ACK block follows the flags byte |
+
+**When `has_ack` is set**, bytes 2–3 (before the sensor entries) contain:
+
+| Byte | Field |
+|------|-------|
+| 0 | `ack_cmd_id` — the command ID that was processed |
+| 1 | `ack_status` — `0x01` = success, `0x00` = failure |
+
+The ChirpStack codec decodes this as `_ack: { cmd_id: N, success: true/false }` in the uplink object. The ACK is sent **once** per command — the flag clears after the uplink is transmitted.
+
+If the payload would exceed `max_bytes` with the ACK, the ACK is deferred to the next cycle.
+
+**Note:** ACK only works in **packed** payload mode. Legacy 4-byte uplinks do not carry ACK.
+
+### MQTT bridge (Zigbee commands)
+
+Commands that target Zigbee2MQTT (e.g. `permit_join`) are published **directly** to the local Mosquitto broker via `mosquitto_pub` (the LoRa container includes `mosquitto-clients` and uses `network_mode: host`). This means Zigbee commands execute immediately — no sidecar or file watcher needed.
+
+An audit log is also written to `/data/downlink-commands/latest.json` (host: `data/downlink-commands/`).
+
+Example `latest.json`:
+
+```json
+{"command":"permit_join","value":true,"time":120,"ts":1713100000,"mqtt":true}
+```
+
+### Environment overrides
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DOWNLINK_CMD_DIR` | `/data/downlink-commands` | Directory for command audit log files |
+| `DOWNLINK_MQTT_HOST` | `127.0.0.1` | MQTT broker host for Zigbee commands |
+| `DOWNLINK_MQTT_PORT` | `1883` | MQTT broker port |
+
+### Testing via ChirpStack UI
+
+1. Open ChirpStack → **Applications** → your application → **Devices** → select the edge device.
+2. Go to the **Queue** tab.
+3. **Enqueue downlink:**
+   - **fPort:** `10`
+   - **Payload** (hex): see examples below.
+   - **Confirmed:** optional (MAC-level ACK only; application ACK is automatic in the next uplink).
+4. Wait for the next uplink (check `docker compose logs chirpstack-lora-node`). The downlink is delivered in the RX window after the uplink.
+
+### Test payloads (hex)
+
+| Command | Hex payload | Meaning |
+|---------|-------------|---------|
+| Ping | `01` | Expect `PONG` in logs; next uplink carries `_ack: { cmd_id: 1, success: true }` |
+| Set interval to 60 s | `02003c` | `0x003C` = 60 decimal |
+| Set interval to 300 s | `02012c` | `0x012C` = 300 decimal |
+| Enable join 120 s | `0378` | `0x78` = 120 seconds; publishes to Z2M MQTT |
+| Disable join | `0300` | duration 0 = disable |
+
+### Log output
+
+```
+[lorawan-node] downlink: RX1 3 bytes fPort=10
+[downlink] cmd=0x02 payload=2 bytes: 00 3c
+[downlink] result: cmd=0x02 OK — uplink interval 300 -> 60 s
+[lorawan-node] uplink ACK: cmd=0x02 status=1
+[lorawan-node] uplink application payload: 18 bytes
+```
+
+### Extending
+
+To add new commands:
+
+1. Add a new `DownlinkCmd` enum value in `downlink_handler.hpp`.
+2. Implement the handler function in `downlink_handler.cpp`.
+3. Add the `case` to the dispatcher `switch`.
+4. Document in this table.
 
 ## References
 

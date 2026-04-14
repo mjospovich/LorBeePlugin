@@ -106,6 +106,7 @@ services:
       - ${LORBEE_STACK_ROOT:-.}/lora/chirpstack-node/config.yaml:/etc/lora/config.yaml:ro
       - ${LORBEE_SNAPSHOT_HOST:-./data/snapshot}:/data/snapshot:ro
       - ${LORBEE_STACK_ROOT:-.}/data/lorawan-state:/data/lorawan-state
+      - ${LORBEE_STACK_ROOT:-.}/data/downlink-commands:/data/downlink-commands
     env_file:
       - path: ${LORBEE_STACK_ROOT:-.}/lora/chirpstack-node/keys.env
         required: false
