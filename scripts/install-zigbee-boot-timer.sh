@@ -28,6 +28,9 @@ echo "lorbee: stack root = $ROOT"
 install -m 0644 "$SVC_SRC" "$TMR_SRC" /etc/systemd/system/
 sed -i "s|STACK_ROOT_PLACEHOLDER|$ROOT|g" /etc/systemd/system/lorbee-zigbee-after-boot.service
 
+# systemd ExecStart execve() requires +x on the script (Makefile/docs use `bash script` so this is easy to miss).
+chmod +x "$ROOT/scripts/stack-after-boot.sh"
+
 systemctl daemon-reload
 systemctl enable --now lorbee-zigbee-after-boot.timer
 
