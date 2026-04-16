@@ -95,6 +95,8 @@ services:
       dockerfile: Dockerfile
       args:
         RADIOLIB_VERSION: "7.6.0"
+        # Pi: keep 1 to avoid OOM during RadioLib (Docker exit 137). Faster machines: 2–4
+        BUILD_JOBS: ${LORA_BUILD_JOBS:-1}
     restart: unless-stopped
     privileged: true
     network_mode: host
