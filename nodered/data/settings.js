@@ -540,7 +540,8 @@ module.exports = {
      *    global.get("os")
      */
     functionGlobalContext: {
-        // os:require('os'),
+        /** Used by snapshot flows to read /data/snapshot/latest.json (Zigbee-less + aux sensors). */
+        fs: require('fs'),
     },
 
     /** The maximum number of messages nodes will buffer internally as part of their

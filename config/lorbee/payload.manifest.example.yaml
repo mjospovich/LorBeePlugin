@@ -28,3 +28,6 @@ entries:
   - id: 3
     device: "sps30"
     type: air_quality
+  # - id: 4
+  #   device: "bme680"
+  #   type: climate   # only if your LoRa encoder maps devices.bme680 fields to the climate row

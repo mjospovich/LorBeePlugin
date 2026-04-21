@@ -17,14 +17,18 @@ snapshot:
   path: /data/snapshot/latest.json
   device_ieee: ""
 
-# payload:
-#   format: packed
-#   include_status: true
-#   max_bytes: 222
-#   entries:
-#     - id: 1
-#       device: "0x0011223344556677"
-#       type: climate
-#     - id: 2
-#       device: "0x8899aabbccddeeff"
-#       type: motion
+payload:
+  format: packed
+  include_status: true
+  max_bytes: 222
+  entries:
+    - id: 1
+      device: "0x0011223344556677"
+      type: climate
+    # - id: 2
+    #   device: "0x8899aabbccddeeff"
+    #   type: motion
+    # Non-Zigbee keys from Node-RED (e.g. devices.bme680 with temperature_c / humidity_pct):
+    - id: 3
+      device: "bme680"
+      type: climate

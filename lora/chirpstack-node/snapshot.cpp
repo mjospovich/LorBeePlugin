@@ -4,6 +4,23 @@
 #include <fstream>
 #include <sstream>
 
+static bool read_temp_hum(const nlohmann::json& dev, double& temp_c, double& hum_pct) {
+  if(!dev.is_object()) { return false; }
+  temp_c = NAN;
+  hum_pct = NAN;
+  if(dev.contains("temperature") && dev["temperature"].is_number()) {
+    temp_c = dev["temperature"].get<double>();
+  } else if(dev.contains("temperature_c") && dev["temperature_c"].is_number()) {
+    temp_c = dev["temperature_c"].get<double>();
+  }
+  if(dev.contains("humidity") && dev["humidity"].is_number()) {
+    hum_pct = dev["humidity"].get<double>();
+  } else if(dev.contains("humidity_pct") && dev["humidity_pct"].is_number()) {
+    hum_pct = dev["humidity_pct"].get<double>();
+  }
+  return !std::isnan(temp_c) && !std::isnan(hum_pct);
+}
+
 bool load_snapshot_json(const std::string& path, nlohmann::json& out, std::string& err) {
   std::ifstream f(path);
   if(!f) {
@@ -22,11 +39,12 @@ bool load_snapshot_json(const std::string& path, nlohmann::json& out, std::strin
 }
 
 static bool fill_from_object(const nlohmann::json& dev, SnapshotReadout& out) {
-  if(!dev.is_object()) { return false; }
-  if(!dev.contains("temperature") || !dev.contains("humidity")) { return false; }
+  double t = NAN;
+  double h = NAN;
+  if(!read_temp_hum(dev, t, h)) { return false; }
   try {
-    out.temperature = dev["temperature"].get<double>();
-    out.humidity = dev["humidity"].get<double>();
+    out.temperature = t;
+    out.humidity = h;
     out.ok = true;
     out.error.clear();
     return true;

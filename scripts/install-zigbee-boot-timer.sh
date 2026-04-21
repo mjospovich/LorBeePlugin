@@ -36,7 +36,7 @@ systemctl enable --now lorbee-zigbee-after-boot.timer
 
 echo ""
 echo "lorbee: timer enabled. Each boot it runs scripts/stack-after-boot.sh:"
-echo "        wait for Zigbee USB → up mosquitto zigbee2mqtt nodered → optional restart zigbee2mqtt → optional LoRa"
+echo "        wait for Zigbee USB → up mosquitto zigbee2mqtt nodered → optional restart zigbee2mqtt → optional sps30/bme680/LoRa"
 echo "  systemctl status lorbee-zigbee-after-boot.timer"
 echo "  journalctl -u lorbee-zigbee-after-boot.service -n 40 --no-pager"
 echo ""

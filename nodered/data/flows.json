@@ -4,7 +4,7 @@
         "type": "tab",
         "label": "Sensor snapshot",
         "disabled": false,
-        "info": "LorBee merged Zigbee state: MQTT lorbee/edges/<EDGE_ID>/sensors/latest + edge/sensors/latest, data/snapshot/latest.json on host, GET /api/lorbee/v1/sensors"
+        "info": "Merged sensor snapshot: Zigbee2MQTT + optional sps30/bme680. On start, latest.json is loaded into memory when present (Zigbee-less sites). Host: data/snapshot/latest.json → /data/snapshot in container."
     },
     {
         "id": "mqtt_broker_1",
@@ -125,7 +125,7 @@
         "type": "function",
         "z": "tab_snapshot",
         "name": "Merge SPS30 into snapshot",
-        "func": "function applyEdgeMeta(snap) {\n    const raw = env.get('EDGE_ID') || 'default';\n    const edge_id = String(raw).replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 64) || 'default';\n    snap.edge_id = edge_id;\n    snap.source = 'lorbee.edge-snapshot';\n    return edge_id;\n}\nlet payload = msg.payload;\nif (typeof payload === 'string') {\n    try { payload = JSON.parse(payload); } catch (e) { return null; }\n}\nif (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return null;\nlet snap = global.get('sensor_snapshot');\nif (!snap || typeof snap !== 'object') {\n    snap = { schema_version: 2, source: 'lorbee.edge-snapshot', edge_id: null, updated_at: null, devices: {}, device_labels: {} };\n}\nsnap.devices['sps30'] = payload;\nsnap.updated_at = new Date().toISOString();\nsnap.schema_version = 2;\nconst edgeId = applyEdgeMeta(snap);\nglobal.set('sensor_snapshot', snap);\nconst t1 = 'lorbee/edges/' + edgeId + '/sensors/latest';\nreturn [\n    { payload: snap, topic: t1 },\n    { payload: snap, topic: 'edge/sensors/latest' },\n    { payload: JSON.stringify(snap, null, 2) }\n];",
+        "func": "function applyEdgeMeta(snap) {\n    const raw = env.get('EDGE_ID') || 'default';\n    const edge_id = String(raw).replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 64) || 'default';\n    snap.edge_id = edge_id;\n    snap.source = 'lorbee.edge-snapshot';\n    return edge_id;\n}\nlet payload = msg.payload;\nif (typeof payload === 'string') {\n    try { payload = JSON.parse(payload); } catch (e) { return null; }\n}\nif (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return null;\nlet snap = global.get('sensor_snapshot');\nif (!snap || typeof snap !== 'object') {\n    const fs = global.get('fs');\n    if (fs) {\n        try {\n            const p = '/data/snapshot/latest.json';\n            if (fs.existsSync(p)) {\n                snap = JSON.parse(fs.readFileSync(p, 'utf8'));\n                if (!snap || typeof snap !== 'object') snap = null;\n            }\n        } catch (e) { node.warn('sps30 hydrate: ' + e.message); snap = null; }\n    }\n}\nif (!snap || typeof snap !== 'object') {\n    snap = { schema_version: 2, source: 'lorbee.edge-snapshot', edge_id: null, updated_at: null, devices: {}, device_labels: {} };\n}\nif (!snap.devices || typeof snap.devices !== 'object') {\n    snap.devices = {};\n}\nif (!snap.device_labels || typeof snap.device_labels !== 'object') {\n    snap.device_labels = {};\n}\nsnap.devices['sps30'] = payload;\nsnap.updated_at = new Date().toISOString();\nsnap.schema_version = 2;\nconst edgeId = applyEdgeMeta(snap);\nglobal.set('sensor_snapshot', snap);\nconst t1 = 'lorbee/edges/' + edgeId + '/sensors/latest';\nreturn [\n    { payload: snap, topic: t1 },\n    { payload: snap, topic: 'edge/sensors/latest' },\n    { payload: JSON.stringify(snap, null, 2) }\n];",
         "outputs": 3,
         "timeout": 0,
         "noerr": 0,
@@ -134,6 +134,43 @@
         "libs": [],
         "x": 370,
         "y": 440,
+        "wires": [
+            ["mqtt_out_lorbee_snap"],
+            ["mqtt_out_legacy_snap"],
+            ["file_edge_snap"]
+        ]
+    },
+    {
+        "id": "mqtt_in_bme680",
+        "type": "mqtt in",
+        "z": "tab_snapshot",
+        "name": "bme680/raw",
+        "topic": "bme680/raw",
+        "qos": "0",
+        "datatype": "utf8",
+        "broker": "mqtt_broker_1",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 120,
+        "y": 500,
+        "wires": [["func_merge_bme680"]]
+    },
+    {
+        "id": "func_merge_bme680",
+        "type": "function",
+        "z": "tab_snapshot",
+        "name": "Merge BME680 into snapshot",
+        "func": "function applyEdgeMeta(snap) {\n    const raw = env.get('EDGE_ID') || 'default';\n    const edge_id = String(raw).replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 64) || 'default';\n    snap.edge_id = edge_id;\n    snap.source = 'lorbee.edge-snapshot';\n    return edge_id;\n}\nlet payload = msg.payload;\nif (typeof payload === 'string') {\n    try { payload = JSON.parse(payload); } catch (e) { return null; }\n}\nif (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return null;\nlet snap = global.get('sensor_snapshot');\nif (!snap || typeof snap !== 'object') {\n    const fs = global.get('fs');\n    if (fs) {\n        try {\n            const p = '/data/snapshot/latest.json';\n            if (fs.existsSync(p)) {\n                snap = JSON.parse(fs.readFileSync(p, 'utf8'));\n                if (!snap || typeof snap !== 'object') snap = null;\n            }\n        } catch (e) { node.warn('bme680 hydrate: ' + e.message); snap = null; }\n    }\n}\nif (!snap || typeof snap !== 'object') {\n    snap = { schema_version: 2, source: 'lorbee.edge-snapshot', edge_id: null, updated_at: null, devices: {}, device_labels: {} };\n}\nif (!snap.devices || typeof snap.devices !== 'object') {\n    snap.devices = {};\n}\nif (!snap.device_labels || typeof snap.device_labels !== 'object') {\n    snap.device_labels = {};\n}\nsnap.devices['bme680'] = payload;\nsnap.updated_at = new Date().toISOString();\nsnap.schema_version = 2;\nconst edgeId = applyEdgeMeta(snap);\nglobal.set('sensor_snapshot', snap);\nconst t1 = 'lorbee/edges/' + edgeId + '/sensors/latest';\nreturn [\n    { payload: snap, topic: t1 },\n    { payload: snap, topic: 'edge/sensors/latest' },\n    { payload: JSON.stringify(snap, null, 2) }\n];",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 370,
+        "y": 500,
         "wires": [
             ["mqtt_out_lorbee_snap"],
             ["mqtt_out_legacy_snap"],
@@ -189,6 +226,39 @@
         "encoding": "none",
         "x": 640,
         "y": 180,
+        "wires": [[]]
+    },
+    {
+        "id": "inject_hydrate_snap",
+        "type": "inject",
+        "z": "tab_snapshot",
+        "name": "On start: hydrate snapshot from disk",
+        "props": [{"p": "payload"}],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 130,
+        "y": 540,
+        "wires": [["func_hydrate_snap"]]
+    },
+    {
+        "id": "func_hydrate_snap",
+        "type": "function",
+        "z": "tab_snapshot",
+        "name": "latest.json → global (no Zigbee)",
+        "func": "const fs = global.get('fs');\nif (!fs) {\n    return null;\n}\ntry {\n    const p = '/data/snapshot/latest.json';\n    if (fs.existsSync(p)) {\n        const snap = JSON.parse(fs.readFileSync(p, 'utf8'));\n        if (snap && typeof snap === 'object') {\n            if (!snap.devices || typeof snap.devices !== 'object') {\n                snap.devices = {};\n            }\n            if (!snap.device_labels || typeof snap.device_labels !== 'object') {\n                snap.device_labels = {};\n            }\n            snap.schema_version = 2;\n            global.set('sensor_snapshot', snap);\n        }\n    }\n} catch (e) {\n    node.warn('hydrate startup: ' + e.message);\n}\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 540,
         "wires": [[]]
     },
     {

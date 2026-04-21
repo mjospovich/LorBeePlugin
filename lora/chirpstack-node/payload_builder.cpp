@@ -57,22 +57,33 @@ static void append_status_block(const nlohmann::json& dev, std::vector<uint8_t>&
 static bool encode_data_field(const std::string& fname, const nlohmann::json& dev,
     std::vector<uint8_t>& buf, std::string& err) {
   if(fname == "temperature") {
-    if(!dev.contains("temperature") || !dev["temperature"].is_number()) {
+    double t = NAN;
+    if(dev.contains("temperature") && dev["temperature"].is_number()) {
+      t = dev["temperature"].get<double>();
+    } else if(dev.contains("temperature_c") && dev["temperature_c"].is_number()) {
+      t = dev["temperature_c"].get<double>();
+    }
+    if(std::isnan(t)) {
       append_i16_be(buf, (int16_t)0x7fff);
       return true;
     }
-    double t = dev["temperature"].get<double>();
     long v = std::lround(t * 100.0);
     v = std::max(-32768L, std::min(v, 32767L));
     append_i16_be(buf, (int16_t)v);
     return true;
   }
   if(fname == "humidity") {
-    if(!dev.contains("humidity") || !dev["humidity"].is_number()) {
+    double hp = NAN;
+    if(dev.contains("humidity") && dev["humidity"].is_number()) {
+      hp = dev["humidity"].get<double>();
+    } else if(dev.contains("humidity_pct") && dev["humidity_pct"].is_number()) {
+      hp = dev["humidity_pct"].get<double>();
+    }
+    if(std::isnan(hp)) {
       append_u16_be(buf, 0xffff);
       return true;
     }
-    long h = std::lround(dev["humidity"].get<double>() * 100.0);
+    long h = std::lround(hp * 100.0);
     h = std::max(0L, std::min(h, 65535L));
     append_u16_be(buf, (uint16_t)h);
     return true;

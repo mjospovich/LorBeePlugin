@@ -9,6 +9,7 @@ cd "$ROOT"
 INTERACTIVE=1
 WITH_LORA=0
 WITH_SPS30=0
+WITH_BME680=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
   -y | --yes)
@@ -23,6 +24,10 @@ while [[ $# -gt 0 ]]; do
     WITH_SPS30=1
     shift
     ;;
+  --with-bme680)
+    WITH_BME680=1
+    shift
+    ;;
   -h | --help)
     cat <<'EOF'
 LorBeePlugin — first-run setup
@@ -31,11 +36,12 @@ LorBeePlugin — first-run setup
   bash scripts/setup-first-run.sh --yes        Non-interactive: Zigbee + core .env only
   bash scripts/setup-first-run.sh --yes --with-lora   Non-interactive + default LoRa pins + COMPOSE_PROFILES=lora
   bash scripts/setup-first-run.sh --yes --with-sps30  Non-interactive + auto-detect SPS30 serial
+  bash scripts/setup-first-run.sh --yes --with-bme680 Non-interactive + default BME680 I2C + COMPOSE_PROFILES=bme680
   make setup-first-run                         Same as the first form (needs: apt install make)
 
 Creates or updates .env, optional LoRa pin/region keys in keys.env, optional SPS30 serial
-device, copies zigbee2mqtt configuration template if missing, optional Zigbee channel/adapter
-in configuration.yaml, runs ensure-data-dirs. Does not start Docker.
+device, optional BME680 I2C settings, copies zigbee2mqtt configuration template if missing,
+optional Zigbee channel/adapter in configuration.yaml, runs ensure-data-dirs. Does not start Docker.
 
 Non-interactive Zigbee RF: set LORBEE_ZIGBEE_CHANNEL=11-26 and/or LORBEE_ZIGBEE_ADAPTER
 (zstack|ember|deconz|zigate) before  --yes .
@@ -63,6 +69,9 @@ if [[ -n "${LORBEE_SETUP_WITH_LORA:-}" ]]; then
 fi
 if [[ -n "${LORBEE_SETUP_WITH_SPS30:-}" ]]; then
   WITH_SPS30=1
+fi
+if [[ -n "${LORBEE_SETUP_WITH_BME680:-}" ]]; then
+  WITH_BME680=1
 fi
 
 say() { printf '%s\n' "$*"; }
@@ -101,6 +110,38 @@ prompt_int() {
     fi
     say "Enter an integer from $min to $max." >&2
   done
+}
+
+# Show LoRa RFM / SPI usage so BME680 wiring stays on I2C (SDA/SCL) or avoids GPIO clashes.
+lora_rf_pins_summary() {
+  local keys="$1"
+  [[ -f "$keys" ]] || return 0
+  local cs d0 rst spich
+  cs=$(grep -E '^RFM_PIN_CS=' "$keys" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
+  d0=$(grep -E '^RFM_PIN_DIO0=' "$keys" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
+  rst=$(grep -E '^RFM_PIN_RST=' "$keys" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
+  spich=$(grep -E '^RFM_SPI_CHANNEL=' "$keys" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
+  if [[ -z "${cs:-}" && -z "${d0:-}" && -z "${rst:-}" ]]; then
+    return 0
+  fi
+  say "LoRa RFM (from keys.env): RFM_SPI_CHANNEL=${spich:-?} RFM_PIN_CS=${cs:-?} RFM_PIN_DIO0=${d0:-?} RFM_PIN_RST=${rst:-?}"
+  say "  SPI0: BCM 9=MISO, 10=MOSI, 11=SCLK; kernel CE0=GPIO8 CE1=GPIO7 — your radio NSS is GPIO${cs:-?}, not CE0/CE1."
+}
+
+# Optional SPI CS for BME680 vs LoRa — same BCM number is invalid.
+bme680_spi_cs_conflicts_lora() {
+  local cs="$1" keys="$2"
+  [[ -f "$keys" ]] || return 1
+  local v
+  for v in RFM_PIN_CS RFM_PIN_DIO0 RFM_PIN_RST; do
+    local p
+    p=$(grep -E "^${v}=" "$keys" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
+    if [[ -n "$p" && "$p" == "$cs" ]]; then
+      say "Conflict: BME680 SPI CS GPIO${cs} is already used by ${v} for LoRa." >&2
+      return 0
+    fi
+  done
+  return 1
 }
 
 zigbee_yaml_channel_get() {
@@ -622,6 +663,118 @@ if [[ "$SPS30_DO" -eq 1 ]]; then
   say "  docker compose --profile sps30 up -d sps30-collector"
 fi
 
+# --- Optional BME680 (I2C) — pin-aware vs LoRa in keys.env ---
+BME680_DO=0
+BME680_COMPOSE=0
+BME680_CONFIGURED=0
+
+if [[ "$INTERACTIVE" -eq 1 ]]; then
+  say ""
+  if yes_no "Configure optional BME680 environmental sensor (I2C — temp / humidity / pressure / gas resistance)?" n; then
+    BME680_DO=1
+  fi
+elif [[ "$WITH_BME680" -eq 1 ]]; then
+  BME680_DO=1
+  BME680_COMPOSE=1
+fi
+
+if [[ "$BME680_DO" -eq 1 ]]; then
+  say ""
+  say "BME680: this stack's collector (bme680-collector) supports I2C only — Pimoroni bme680 + /dev/i2c-*."
+  say "  SPI would share the SPI0 bus and GPIO namespace with the LoRa RFM9x; use I2C here (SDA/SCL on BCM2/3)."
+  lora_rf_pins_summary "$KEYS"
+  say ""
+  say "Seven pads on many breakouts: 3V3/VIN, GND, SCK, SDI (SDA), CS, SDO, PS — not all are used in I2C mode."
+  say "  I2C wiring: SDA→BCM2 (pin 3), SCL→BCM3 (pin 5), 3V3 (pin 1 or 17), GND (e.g. pin 6)."
+  say "  CS must be tied high (to 3V3) for I2C; SDO→GND = address 0x76, SDO→3V3 = 0x77."
+  say "Default 100 kHz I2C is fine for BME680; you can raise to 400 kHz in firmware if you need faster reads."
+  say ""
+
+  B680_BUS=1
+  B680_ADDR="0x76"
+  B680_INT=60
+
+  if [[ "$INTERACTIVE" -eq 1 ]]; then
+    say "Link type for this wizard (collector always uses I2C):"
+    say "  1) I2C — recommended with LoRa on SPI (no GPIO overlap with RFM NSS/DIO0/RST)"
+    say "  2) SPI only on the bench — not supported by bme680-collector (choose 1 for this Pi)"
+    read -r -p "Choose 1/2 [1]: " b680link || true
+    b680link="${b680link:-1}"
+    if [[ "$b680link" == "2" ]]; then
+      say ""
+      say "SPI + LoRa on one Pi: both would contend for SPI0 (MOSI/MISO/SCK) and you must unique CS lines;"
+      say "this image does not ship a SPI BME680 reader — use I2C (wiring above) or a second host."
+      if ! yes_no "Proceed with I2C settings in .env anyway (you will wire I2C on the board)?" y; then
+        BME680_DO=0
+      fi
+    fi
+  fi
+
+  if [[ "$BME680_DO" -eq 1 ]]; then
+    if [[ "$INTERACTIVE" -eq 1 ]]; then
+      B680_BUS="$(prompt_int "I2C bus number (Raspberry Pi: almost always 1 → /dev/i2c-1)" 0 20 1)"
+      say "I2C address: 0x76 (SDO→GND) or 0x77 (SDO→3V3) on Bosch-compatible breakouts."
+      read -r -p "Hex address [0x76]: " b680a || true
+      b680a="${b680a:-0x76}"
+      if [[ "$b680a" == "0x77" ]]; then
+        B680_ADDR="0x77"
+      else
+        B680_ADDR="0x76"
+      fi
+      B680_INT="$(prompt_int "BME680 read interval (seconds, min 10)" 10 3600 60)"
+    fi
+
+    upsert_env_var "$ENV_FILE" "BME680_PROTOCOL" "i2c"
+    upsert_env_var "$ENV_FILE" "BME680_I2C_BUS" "$B680_BUS"
+    upsert_env_var "$ENV_FILE" "BME680_I2C_DEVICE" "/dev/i2c-${B680_BUS}"
+    upsert_env_var "$ENV_FILE" "BME680_I2C_ADDR" "$B680_ADDR"
+    upsert_env_var "$ENV_FILE" "BME680_INTERVAL" "$B680_INT"
+    upsert_env_var "$ENV_FILE" "BME680_MQTT_TOPIC" "bme680/raw"
+    say "Wrote BME680 I2C settings to .env (BME680_*)."
+    BME680_CONFIGURED=1
+
+    if [[ "$INTERACTIVE" -eq 1 ]]; then
+      say ""
+      say "Optional: document SPI wiring for a second board (not used by Docker). LoRa CS/DIO/RST must stay unique."
+      if yes_no "Record SPI chip-select GPIO for your notes (checks conflict with LoRa keys.env)?" n; then
+        B680_SPI_CS="$(prompt_int "BME680 SPI CS GPIO (BCM), if you ever wire SPI — e.g. 8" 2 40 8)"
+        if bme680_spi_cs_conflicts_lora "$B680_SPI_CS" "$KEYS"; then
+          say "Fix LoRa or BME680 CS in hardware before using both on SPI0." >&2
+        else
+          say "No clash with RFM_PIN_* in keys.env for GPIO${B680_SPI_CS} (still: collector uses I2C only)."
+        fi
+      fi
+    fi
+
+    if [[ "$INTERACTIVE" -eq 1 ]]; then
+      say ""
+      if yes_no "Add bme680 to COMPOSE_PROFILES so the collector starts with the main stack?" y; then
+        BME680_COMPOSE=1
+      fi
+    fi
+
+    if [[ "$BME680_COMPOSE" -eq 1 ]]; then
+      CUR_PROFILES=""
+      if grep -qE '^COMPOSE_PROFILES=' "$ENV_FILE" 2>/dev/null; then
+        CUR_PROFILES="$(grep -E '^COMPOSE_PROFILES=' "$ENV_FILE" | tail -1 | cut -d= -f2-)"
+      fi
+      if [[ "$CUR_PROFILES" != *bme680* ]]; then
+        if [[ -n "$CUR_PROFILES" ]]; then
+          upsert_env_var "$ENV_FILE" "COMPOSE_PROFILES" "${CUR_PROFILES},bme680"
+        else
+          upsert_env_var "$ENV_FILE" "COMPOSE_PROFILES" "bme680"
+        fi
+      fi
+      say "Added bme680 to COMPOSE_PROFILES in .env"
+    fi
+
+    say ""
+    say "BME680: build once on the Pi:"
+    say "  docker compose --profile bme680 build bme680-collector"
+    say "  docker compose --profile bme680 up -d bme680-collector"
+  fi
+fi
+
 bash "$ROOT/scripts/ensure-data-dirs.sh"
 
 say ""
@@ -642,6 +795,12 @@ if [[ "$SPS30_DO" -eq 1 ]]; then
   say "SPS30: build and start:"
   say "  docker compose --profile sps30 build sps30-collector"
   say "  docker compose --profile sps30 up -d sps30-collector"
+fi
+if [[ "${BME680_CONFIGURED:-0}" -eq 1 ]]; then
+  say ""
+  say "BME680: build and start:"
+  say "  docker compose --profile bme680 build bme680-collector"
+  say "  docker compose --profile bme680 up -d bme680-collector"
 fi
 say ""
 say "Docs: README.md, docs/configuration-map.md"
