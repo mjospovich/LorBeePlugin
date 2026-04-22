@@ -13,6 +13,7 @@
 #include <RadioLib.h>
 #include <hal/RPi/PiHal.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -20,6 +21,7 @@
 #include <string>
 #include <vector>
 #include <strings.h>
+#include <ctime>
 
 static const char* env_get(const char* k, const char* dflt) {
   const char* v = std::getenv(k);
@@ -56,6 +58,30 @@ static uint32_t snapshot_retry_ms_from_env() {
   if(sec < 5) { sec = 5; }
   if(sec > 120) { sec = 120; }
   return sec * 1000UL;
+}
+
+static uint32_t alarm_poll_ms_from_env() {
+  unsigned long sec = 5;
+  if(const char* s = std::getenv("LORAWAN_ALARM_POLL_SEC")) {
+    if(s[0]) { sec = std::strtoul(s, nullptr, 10); }
+  }
+  if(sec < 1) { sec = 1; }
+  if(sec > 60) { sec = 60; }
+  return sec * 1000UL;
+}
+
+static uint32_t alarm_rearm_ms_from_env() {
+  unsigned long sec = 60;
+  if(const char* s = std::getenv("LORAWAN_ALARM_REARM_SEC")) {
+    if(s[0]) { sec = std::strtoul(s, nullptr, 10); }
+  }
+  if(sec < 1) { sec = 1; }
+  if(sec > 3600) { sec = 3600; }
+  return sec * 1000UL;
+}
+
+static uint64_t now_ms_epoch() {
+  return (uint64_t)std::time(nullptr) * 1000ULL;
 }
 
 static int hex_val(char c) {
@@ -257,9 +283,14 @@ int main() {
   }
 
   const uint32_t snap_retry_ms = snapshot_retry_ms_from_env();
+  const uint32_t alarm_poll_ms = alarm_poll_ms_from_env();
+  const uint32_t alarm_rearm_ms = alarm_rearm_ms_from_env();
+  bool alarm_prev_active = false;
+  uint64_t last_alarm_uplink_ms = 0;
   for(;;) {
     int16_t st = RADIOLIB_ERR_NONE;
     bool skipped_uplink = false;
+    bool uplink_has_alarm = false;
 
     uint8_t dl_buf[256];
     size_t dl_len = 0;
@@ -274,7 +305,7 @@ int main() {
       } else {
         std::vector<uint8_t> payload;
         std::string perr;
-        if(!build_packed_uplink_payload(cfg, snapj, payload, perr)) {
+        if(!build_packed_uplink_payload(cfg, snapj, payload, perr, &uplink_has_alarm)) {
           std::fprintf(stderr, "[lorawan-node] packed payload: %s (skip uplink)\n", perr.c_str());
           skipped_uplink = true;
         } else {
@@ -328,12 +359,51 @@ int main() {
     }
     lorawan_save_after_uplink(node);
 
+    if(cfg.payload.format == PayloadFormat::Packed && !skipped_uplink) {
+      alarm_prev_active = uplink_has_alarm;
+      if(uplink_has_alarm) {
+        last_alarm_uplink_ms = now_ms_epoch();
+      }
+    }
+
     uint32_t wait_ms = skipped_uplink ? snap_retry_ms : (rt_state.uplink_interval_sec * 1000UL);
     if(skipped_uplink) {
       std::fprintf(stderr,
           "[lorawan-node] retry snapshot in %u s (LORAWAN_SNAPSHOT_RETRY_SEC)\n",
           (unsigned)(wait_ms / 1000UL));
     }
-    hal.delay(wait_ms);
+    if(cfg.payload.format == PayloadFormat::Packed && alarm_poll_ms > 0 && wait_ms > alarm_poll_ms) {
+      bool send_early_for_alarm = false;
+      uint32_t waited_ms = 0;
+      while(waited_ms < wait_ms) {
+        uint32_t step_ms = std::min(alarm_poll_ms, wait_ms - waited_ms);
+        hal.delay(step_ms);
+        waited_ms += step_ms;
+        if(waited_ms >= wait_ms) { break; }
+
+        nlohmann::json snapj_poll;
+        std::string jerr_poll;
+        if(!load_snapshot_json(cfg.snapshot.path, snapj_poll, jerr_poll)) { continue; }
+
+        std::vector<uint8_t> payload_poll;
+        std::string perr_poll;
+        bool alarm_now = false;
+        if(!build_packed_uplink_payload(cfg, snapj_poll, payload_poll, perr_poll, &alarm_now)) { continue; }
+        bool rising = alarm_now && !alarm_prev_active;
+        bool rearm = alarm_now && (now_ms_epoch() - last_alarm_uplink_ms >= alarm_rearm_ms);
+        alarm_prev_active = alarm_now;
+
+        if(rising || rearm) {
+          std::fprintf(stderr,
+              "[lorawan-node] alarm active; sending early uplink now (waited %u/%u ms)\n",
+              (unsigned)waited_ms, (unsigned)wait_ms);
+          send_early_for_alarm = true;
+          break;
+        }
+      }
+      if(send_early_for_alarm) { continue; }
+    } else {
+      hal.delay(wait_ms);
+    }
   }
 }

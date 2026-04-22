@@ -577,3 +577,30 @@ To add new commands:
 - RadioLib: https://github.com/jgromes/RadioLib  
 - lgpio: https://github.com/joan2937/lg  
 - ChirpStack: https://www.chirpstack.io/
+
+## Alarm flags in packed payload (v4)
+
+Packed v4 now supports a per-entry alarm without adding extra bytes:
+
+- `sensor_type` byte uses bit7 (`0x80`) as `alarm`.
+- Type ID remains in bits0..6 (`sensor_type & 0x7f`).
+- Decoder should only emit `alarm: 1` when bit7 is set.
+
+This keeps payload size minimal and avoids sending a separate alarm field.
+
+Threshold source is the runtime snapshot (`/data/snapshot/latest.json`), so Node-RED can update it live.
+Supported locations (first match wins):
+
+1. `alarms.thresholds.<device_key>`
+2. `alarm_thresholds.<device_key>`
+3. `devices.<device_key>.alarm_thresholds`
+
+Rule syntax per field:
+
+- Number: `gt`
+- Boolean/String: `eq`
+- Object: any of `gt`, `gte`, `lt`, `lte`, `eq`, `neq`
+
+Reference decoder file with this logic:
+
+- `docs/chirpstack-codec-v4-alarm.js`

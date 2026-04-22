@@ -3,6 +3,17 @@
 #include <algorithm>
 #include <cmath>
 
+static bool is_hex_ieee_key(const std::string& key) {
+  return key.size() >= 18 && key.rfind("0x", 0) == 0;
+}
+
+static std::string lower_hex_ieee_key(std::string key) {
+  for(char& c : key) {
+    if(c >= 'A' && c <= 'F') { c = (char)(c - 'A' + 'a'); }
+  }
+  return key;
+}
+
 static void append_u8(std::vector<uint8_t>& b, uint8_t v) {
   b.push_back(v);
 }
@@ -27,16 +38,232 @@ static const nlohmann::json* find_device(const nlohmann::json& devices, const st
     std::string& err) {
   auto it = devices.find(key);
   if(it != devices.end()) { return &it.value(); }
-  if(key.size() >= 18 && key.rfind("0x", 0) == 0) {
-    std::string lk = key;
-    for(char& c : lk) {
-      if(c >= 'A' && c <= 'F') { c = (char)(c - 'A' + 'a'); }
-    }
+  if(is_hex_ieee_key(key)) {
+    std::string lk = lower_hex_ieee_key(key);
     it = devices.find(lk);
     if(it != devices.end()) { return &it.value(); }
   }
   err = "device key not in snapshot: " + key;
   return nullptr;
+}
+
+static const nlohmann::json* find_key_casefold(const nlohmann::json& obj, const std::string& key) {
+  if(!obj.is_object()) { return nullptr; }
+  auto it = obj.find(key);
+  if(it != obj.end()) { return &it.value(); }
+  if(is_hex_ieee_key(key)) {
+    it = obj.find(lower_hex_ieee_key(key));
+    if(it != obj.end()) { return &it.value(); }
+  }
+  return nullptr;
+}
+
+static const nlohmann::json* find_alarm_thresholds_for_device(const nlohmann::json& snap_root,
+    const nlohmann::json& dev, const std::string& device_key) {
+  if(snap_root.contains("alarms") && snap_root["alarms"].is_object()) {
+    const auto& a = snap_root["alarms"];
+    if(a.contains("thresholds") && a["thresholds"].is_object()) {
+      if(const nlohmann::json* cfg = find_key_casefold(a["thresholds"], device_key)) {
+        if(cfg->is_object()) { return cfg; }
+      }
+    }
+  }
+
+  if(snap_root.contains("alarm_thresholds") && snap_root["alarm_thresholds"].is_object()) {
+    if(const nlohmann::json* cfg = find_key_casefold(snap_root["alarm_thresholds"], device_key)) {
+      if(cfg->is_object()) { return cfg; }
+    }
+  }
+
+  if(dev.contains("alarm_thresholds") && dev["alarm_thresholds"].is_object()) {
+    return &dev["alarm_thresholds"];
+  }
+
+  return nullptr;
+}
+
+static const nlohmann::json* find_field_threshold_rule(const nlohmann::json& cfg,
+    const std::string& fname) {
+  auto get = [&](const char* key) -> const nlohmann::json* {
+    if(cfg.contains(key)) { return &cfg[key]; }
+    return nullptr;
+  };
+
+  if(const nlohmann::json* direct = get(fname.c_str())) { return direct; }
+
+  if(fname == "temperature") { return get("temperature_c"); }
+  if(fname == "humidity") { return get("humidity_pct"); }
+  if(fname == "motion") {
+    if(const nlohmann::json* v = get("occupancy")) { return v; }
+    return get("motion");
+  }
+  if(fname == "occupancy") { return get("motion"); }
+  if(fname == "illumination") {
+    if(const nlohmann::json* v = get("brightness")) { return v; }
+  }
+  if(fname == "brightness") {
+    if(const nlohmann::json* v = get("illumination")) { return v; }
+  }
+  if(fname == "pm1_0") { return get("pm1_0_ugm3"); }
+  if(fname == "pm2_5") { return get("pm2_5_ugm3"); }
+  if(fname == "pm4_0") { return get("pm4_0_ugm3"); }
+  if(fname == "pm10") { return get("pm10_ugm3"); }
+
+  return nullptr;
+}
+
+static bool read_field_value_json(const std::string& fname, const nlohmann::json& dev,
+    nlohmann::json& out) {
+  out = nullptr;
+
+  if(fname == "temperature") {
+    if(dev.contains("temperature") && dev["temperature"].is_number()) {
+      out = dev["temperature"].get<double>();
+      return true;
+    }
+    if(dev.contains("temperature_c") && dev["temperature_c"].is_number()) {
+      out = dev["temperature_c"].get<double>();
+      return true;
+    }
+    return false;
+  }
+
+  if(fname == "humidity") {
+    if(dev.contains("humidity") && dev["humidity"].is_number()) {
+      out = dev["humidity"].get<double>();
+      return true;
+    }
+    if(dev.contains("humidity_pct") && dev["humidity_pct"].is_number()) {
+      out = dev["humidity_pct"].get<double>();
+      return true;
+    }
+    return false;
+  }
+
+  if(fname == "occupancy" || fname == "motion") {
+    if(!dev.contains("occupancy")) { return false; }
+    if(dev["occupancy"].is_boolean()) {
+      out = dev["occupancy"].get<bool>();
+      return true;
+    }
+    if(dev["occupancy"].is_number()) {
+      out = dev["occupancy"].get<double>() != 0.0;
+      return true;
+    }
+    return false;
+  }
+
+  if(fname == "illumination" || fname == "brightness") {
+    if(dev.contains("illumination") && dev["illumination"].is_string()) {
+      out = dev["illumination"].get<std::string>();
+      return true;
+    }
+    if(dev.contains("brightness") && dev["brightness"].is_string()) {
+      out = dev["brightness"].get<std::string>();
+      return true;
+    }
+    return false;
+  }
+
+  if(fname == "contact") {
+    if(!dev.contains("contact")) { return false; }
+    if(dev["contact"].is_boolean()) {
+      out = dev["contact"].get<bool>();
+      return true;
+    }
+    if(dev["contact"].is_number()) {
+      out = dev["contact"].get<double>() != 0.0;
+      return true;
+    }
+    return false;
+  }
+
+  if(fname == "pm1_0" || fname == "pm2_5" || fname == "pm4_0" || fname == "pm10") {
+    if(dev.contains(fname) && dev[fname].is_number()) {
+      out = dev[fname].get<double>();
+      return true;
+    }
+    std::string suffixed = fname + "_ugm3";
+    if(dev.contains(suffixed) && dev[suffixed].is_number()) {
+      out = dev[suffixed].get<double>();
+      return true;
+    }
+    return false;
+  }
+
+  if(fname == "aqi" || fname == "pressure_hpa" || fname == "gas_resistance_ohm") {
+    if(dev.contains(fname) && dev[fname].is_number()) {
+      out = dev[fname].get<double>();
+      return true;
+    }
+    return false;
+  }
+
+  return false;
+}
+
+static bool json_equal_scalar(const nlohmann::json& a, const nlohmann::json& b) {
+  if(a.is_number() && b.is_number()) {
+    return std::fabs(a.get<double>() - b.get<double>()) < 1e-9;
+  }
+  if(a.is_boolean() && b.is_boolean()) {
+    return a.get<bool>() == b.get<bool>();
+  }
+  if(a.is_string() && b.is_string()) {
+    return a.get<std::string>() == b.get<std::string>();
+  }
+  return false;
+}
+
+static bool threshold_rule_triggered(const nlohmann::json& value, const nlohmann::json& rule) {
+  if(rule.is_number()) {
+    return value.is_number() && value.get<double>() > rule.get<double>();
+  }
+
+  if(rule.is_boolean() || rule.is_string()) {
+    return json_equal_scalar(value, rule);
+  }
+
+  if(!rule.is_object()) { return false; }
+
+  bool triggered = false;
+
+  auto cmp_num = [&](const char* key, bool (*cmp)(double, double)) {
+    if(!rule.contains(key) || !rule[key].is_number() || !value.is_number()) { return; }
+    if(cmp(value.get<double>(), rule[key].get<double>())) { triggered = true; }
+  };
+
+  cmp_num("gt", [](double a, double b) { return a > b; });
+  cmp_num("gte", [](double a, double b) { return a >= b; });
+  cmp_num("lt", [](double a, double b) { return a < b; });
+  cmp_num("lte", [](double a, double b) { return a <= b; });
+
+  if(rule.contains("eq")) {
+    if(json_equal_scalar(value, rule["eq"])) { triggered = true; }
+  }
+  if(rule.contains("neq")) {
+    if(!json_equal_scalar(value, rule["neq"])) { triggered = true; }
+  }
+
+  return triggered;
+}
+
+static bool entry_alarm_triggered(const nlohmann::json& snap_root, const std::string& device_key,
+    const nlohmann::json& dev, const PayloadEntry& en) {
+  const nlohmann::json* acfg = find_alarm_thresholds_for_device(snap_root, dev, device_key);
+  if(!acfg) { return false; }
+
+  for(const std::string& fname : en.fields) {
+    const nlohmann::json* rule = find_field_threshold_rule(*acfg, fname);
+    if(!rule) { continue; }
+
+    nlohmann::json value;
+    if(!read_field_value_json(fname, dev, value)) { continue; }
+
+    if(threshold_rule_triggered(value, *rule)) { return true; }
+  }
+
+  return false;
 }
 
 static void append_status_block(const nlohmann::json& dev, std::vector<uint8_t>& buf) {
@@ -216,7 +443,7 @@ static bool encode_data_field(const std::string& fname, const nlohmann::json& de
 }
 
 bool build_packed_uplink_payload(const AppConfig& cfg, const nlohmann::json& snap_root,
-    std::vector<uint8_t>& out, std::string& err) {
+    std::vector<uint8_t>& out, std::string& err, bool* has_alarm_out) {
   out.clear();
   if(!snap_root.contains("devices") || !snap_root["devices"].is_object()) {
     err = "snapshot missing devices object";
@@ -224,15 +451,14 @@ bool build_packed_uplink_payload(const AppConfig& cfg, const nlohmann::json& sna
   }
   const auto& devices = snap_root["devices"];
 
+  if(has_alarm_out) { *has_alarm_out = false; }
+
   // v4: self-describing entries — each entry carries its sensor_type byte
   // so the decoder doesn't need a positional PLAN, just the type registry.
   append_u8(out, 0x04);
   append_u8(out, cfg.payload.include_status ? 1u : 0u);
 
   for(const PayloadEntry& en : cfg.payload.entries) {
-    append_u8(out, en.id);
-    append_u8(out, static_cast<uint8_t>(en.sensor_type));
-
     std::string lerr;
     const nlohmann::json* pdev = find_device(devices, en.device, lerr);
     if(!pdev) {
@@ -240,6 +466,15 @@ bool build_packed_uplink_payload(const AppConfig& cfg, const nlohmann::json& sna
       return false;
     }
     const nlohmann::json& dev = *pdev;
+
+    const bool alarm = entry_alarm_triggered(snap_root, en.device, dev, en);
+    if(alarm && has_alarm_out) { *has_alarm_out = true; }
+    uint8_t stype_wire = static_cast<uint8_t>(en.sensor_type) & 0x7fu;
+    if(alarm) { stype_wire |= 0x80u; }
+
+    append_u8(out, en.id);
+    append_u8(out, stype_wire);
+
     for(const std::string& fn : en.fields) {
       if(!encode_data_field(fn, dev, out, err)) { return false; }
     }
@@ -253,3 +488,4 @@ bool build_packed_uplink_payload(const AppConfig& cfg, const nlohmann::json& sna
   }
   return true;
 }
+
