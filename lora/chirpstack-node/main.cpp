@@ -49,7 +49,7 @@ static uint32_t startup_grace_ms_from_env() {
 
 /// If packed uplink skipped (missing snapshot file or device), retry sooner than full uplink interval.
 static uint32_t snapshot_retry_ms_from_env() {
-  unsigned long sec = 15;
+  unsigned long sec = 30;
   if(const char* s = std::getenv("LORAWAN_SNAPSHOT_RETRY_SEC")) {
     if(s[0]) { sec = std::strtoul(s, nullptr, 10); }
   }

@@ -6,7 +6,9 @@
 #   Type 0x01  climate      → temperature (i16 BE, °C×100) + humidity (u16 BE, %×100)        = 4 bytes
 #   Type 0x02  motion       → occupancy (u8) + illumination (u8)                              = 2 bytes
 #   Type 0x03  contact      → contact (u8)                                                    = 1 byte
-#   Type 0x04  air_quality  → pm1_0 + pm2_5 + pm4_0 + pm10 (u16 BE each, µg/m³×10)          = 8 bytes
+#   Type 0x04  air_quality      → pm1_0 + pm2_5 + pm4_0 + pm10 (u16 BE each, µg/m³×10)        = 8 bytes
+#   Type 0x05  air_quality_aqi   → same four PM + aqi (u16 BE, US EPA 0–500)                  = 10 bytes
+#   Type 0x06  environment      → climate + pressure_hpa (u16) + gas_resistance_ohm (u32 BE) = 10 bytes
 #
 # See lora/README.md § "Sensor Type Registry" for the full specification.
 # The ChirpStack universal codec uses the same TYPES map to decode any edge.
@@ -27,7 +29,7 @@ entries:
     type: motion
   - id: 3
     device: "sps30"
-    type: air_quality
-  # - id: 4
-  #   device: "bme680"
-  #   type: climate   # only if your LoRa encoder maps devices.bme680 fields to the climate row
+    type: air_quality_aqi
+  - id: 4
+    device: "bme680"
+    type: environment

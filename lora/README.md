@@ -156,7 +156,7 @@ Snapshot **`schema_version`** is **2** (still backward compatible for readers th
 
 The node reads **`snapshot.path`** (default `/data/snapshot/latest.json`). **`payload.format`** selects encoding:
 
-**`device key not in snapshot`:** the IEEE in **`payload.entries`** has no matching key under JSON **`devices`**. Often a **startup race**: the LoRa container joins before **Node-RED** has written **`latest.json`** (Zigbee2MQTT may already publish MQTT seconds earlier). The firmware waits **`LORAWAN_STARTUP_GRACE_SEC`** (default **30 s**) after join before the first uplink, and if an uplink is still skipped it retries after **`LORAWAN_SNAPSHOT_RETRY_SEC`** (default **15 s**) instead of the full **`uplink_interval_sec`**. Set in **`keys.env`**. Other causes: stack not fully up, sensor offline, or **wrong IEEE** in `config.yaml`. **`device_labels`** can list the ID while **`devices`** is empty — the packed builder only reads **`devices`**.
+**`device key not in snapshot`:** the IEEE in **`payload.entries`** has no matching key under JSON **`devices`**. Often a **startup race**: the LoRa container joins before **Node-RED** has written **`latest.json`** (Zigbee2MQTT may already publish MQTT seconds earlier). The firmware waits **`LORAWAN_STARTUP_GRACE_SEC`** (default **30 s**) after join before the first uplink, and if an uplink is still skipped it retries after **`LORAWAN_SNAPSHOT_RETRY_SEC`** (default **30 s**, range **5–120**) instead of the full **`uplink_interval_sec`**. Set in project **`.env`** (wired via **`docker-compose.yml`**) or **`keys.env`**. Other causes: stack not fully up, sensor offline, or **wrong IEEE** in `config.yaml`. **`device_labels`** can list the ID while **`devices`** is empty — the packed builder only reads **`devices`**.
 
 
 ### `legacy` (default)
@@ -194,6 +194,8 @@ The registry is the **single contract** between every edge encoder and the centr
 | **`0x02`** | **`motion`** | `occupancy` (uint8, 0/1/0xFF) + `illumination` (uint8, 0–3) | 2 |
 | **`0x03`** | **`contact`** | `contact` (uint8, 0/1/0xFF) | 1 |
 | **`0x04`** | **`air_quality`** | `pm1_0` + `pm2_5` + `pm4_0` + `pm10` (uint16 BE each, µg/m³×10) | 8 |
+| **`0x05`** | **`air_quality_aqi`** | Same four PM fields as **`0x04`** + **`aqi`** (uint16 BE, US EPA index 0–500 from PM2.5) | 10 |
+| **`0x06`** | **`environment`** | `temperature` + `humidity` (same as **`0x01`**) + `pressure_hpa` (uint16 BE, whole hPa 300–1100) + `gas_resistance_ohm` (uint32 BE, raw Ω; `0xFFFFFFFF` if missing) | 10 |
 
 **To add a new sensor type:**
 
@@ -244,6 +246,9 @@ payload:
 | **`illumination`** / **`brightness`** | `uint8` 0 unknown, 1 dark, 2 medium, 3 bright |
 | **`contact`** | `uint8` 0/1; missing → `0xFF` |
 | **`pm1_0`**, **`pm2_5`**, **`pm4_0`**, **`pm10`** | `uint16` BE, µg/m³×10; missing → `0xFFFF` |
+| **`aqi`** | `uint16` BE, US EPA AQI 0–500 (from PM2.5); missing → `0xFFFF` |
+| **`pressure_hpa`** | `uint16` BE, whole hPa (300–1100); missing → `0xFFFF` |
+| **`gas_resistance_ohm`** | `uint32` BE, BME680 raw gas resistance (Ω); missing → `0xFFFFFFFF` |
 | **`linkquality`**, **`battery`**, **`voltage`** | Via **`include_status`** triplet only |
 
 ### Backward compatibility
@@ -302,7 +307,9 @@ function decodeUplink(input) {
     0x01: { name: 'climate', fields: ['temperature', 'humidity'] },
     0x02: { name: 'motion',  fields: ['occupancy', 'illumination'] },
     0x03: { name: 'contact', fields: ['contact'] },
-    0x04: { name: 'air_quality', fields: ['pm1_0', 'pm2_5', 'pm4_0', 'pm10'] }
+    0x04: { name: 'air_quality', fields: ['pm1_0', 'pm2_5', 'pm4_0', 'pm10'] },
+    0x05: { name: 'air_quality_aqi', fields: ['pm1_0', 'pm2_5', 'pm4_0', 'pm10', 'aqi'] },
+    0x06: { name: 'environment', fields: ['temperature', 'humidity', 'pressure_hpa', 'gas_resistance_ohm'] }
   };
 
   // Optional: human-friendly labels for entry IDs. Customize per deployment.
@@ -314,6 +321,11 @@ function decodeUplink(input) {
     return (raw & 0x8000) ? raw - 0x10000 : raw;
   }
   function readU16() { var v = (b[o] << 8) | b[o + 1]; o += 2; return v; }
+  function readU32() {
+    var v = ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0;
+    o += 4;
+    return v;
+  }
   function readU8() { return b[o++]; }
 
   function readField(fname) {
@@ -342,6 +354,18 @@ function decodeUplink(input) {
       var raw = readU16();
       return raw === 0xffff ? null : raw / 10;
     }
+    if (fname === 'aqi') {
+      var aq = readU16();
+      return aq === 0xffff ? null : aq;
+    }
+    if (fname === 'pressure_hpa') {
+      var ph = readU16();
+      return ph === 0xffff ? null : ph;
+    }
+    if (fname === 'gas_resistance_ohm') {
+      var gr = readU32();
+      return gr === 0xffffffff ? null : gr;
+    }
     return null;
   }
 
@@ -365,7 +389,10 @@ function decodeUplink(input) {
     pm1_0: 'pm1_0_ugm3',
     pm2_5: 'pm2_5_ugm3',
     pm4_0: 'pm4_0_ugm3',
-    pm10: 'pm10_ugm3'
+    pm10: 'pm10_ugm3',
+    aqi: 'aqi',
+    pressure_hpa: 'pressure_hpa',
+    gas_resistance_ohm: 'gas_resistance_ohm'
   };
 
   var out = {};

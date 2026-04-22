@@ -17,6 +17,10 @@ static std::vector<SensorTypeDef> build_registry() {
   r.push_back({SensorType::Motion,     "motion",      {"occupancy", "illumination"}});
   r.push_back({SensorType::Contact,    "contact",     {"contact"}});
   r.push_back({SensorType::AirQuality, "air_quality", {"pm1_0", "pm2_5", "pm4_0", "pm10"}});
+  r.push_back({SensorType::AirQualityAqi, "air_quality_aqi",
+      {"pm1_0", "pm2_5", "pm4_0", "pm10", "aqi"}});
+  r.push_back({SensorType::Environment, "environment",
+      {"temperature", "humidity", "pressure_hpa", "gas_resistance_ohm"}});
   return r;
 }
 

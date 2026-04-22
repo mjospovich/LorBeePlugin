@@ -32,6 +32,31 @@ logger = logging.getLogger("sps30-collector")
 running = True
 
 
+def us_epa_aqi_pm25(pm25_ugm3: float) -> int:
+    """
+    US EPA AQI from PM2.5 concentration (µg/m³), 0–500 scale.
+    Uses standard breakpoint table (same family as AirNow).
+    """
+    c = max(0.0, float(pm25_ugm3))
+    if c > 500.4:
+        return 500
+    # (C_low, C_high, I_low, I_high)
+    bp = [
+        (0.0, 12.0, 0, 50),
+        (12.1, 35.4, 51, 100),
+        (35.5, 55.4, 101, 150),
+        (55.5, 150.4, 151, 200),
+        (150.5, 250.4, 201, 300),
+        (250.5, 350.4, 301, 400),
+        (350.5, 500.4, 401, 500),
+    ]
+    for c_lo, c_hi, i_lo, i_hi in bp:
+        if c_lo <= c <= c_hi:
+            ip = (i_hi - i_lo) / (c_hi - c_lo) * (c - c_lo) + i_lo
+            return int(round(ip))
+    return 500
+
+
 def on_mqtt_connect(client, userdata, flags, reason_code, properties):
     if reason_code == 0:
         logger.info(f"Connected to MQTT broker at {MQTT_BROKER}:{MQTT_PORT}")
@@ -100,15 +125,17 @@ def main():
                     nc_0p5, nc_1p0, nc_2p5, nc_4p0, nc_10p0,
                     typical_size,
                 ) = sensor.read_measurement_values_float()
+                aqi = us_epa_aqi_pm25(mc_2p5)
                 payload = {
                     "pm1_0": round(mc_1p0, 3),
                     "pm2_5": round(mc_2p5, 3),
                     "pm4_0": round(mc_4p0, 3),
                     "pm10": round(mc_10p0, 3),
                     "typical_particle_size_um": round(typical_size, 3),
+                    "aqi": aqi,
                 }
                 mqtt_client.publish(MQTT_TOPIC, json.dumps(payload), qos=0)
-                logger.info(f"Published: pm2.5={mc_2p5:.2f} µg/m³")
+                logger.info(f"Published: pm2.5={mc_2p5:.2f} µg/m³ AQI={aqi}")
                 break
             except Exception as e:
                 if attempt < max_retries - 1:

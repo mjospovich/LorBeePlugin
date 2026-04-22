@@ -28,7 +28,10 @@ payload:
     # - id: 2
     #   device: "0x8899aabbccddeeff"
     #   type: motion
-    # Non-Zigbee keys from Node-RED (e.g. devices.bme680 with temperature_c / humidity_pct):
-    - id: 3
-      device: "bme680"
-      type: climate
+    # BME680 + SPS30 only (types 0x06 / 0x05 — see lora/README.md):
+    # - id: 1
+    #   device: "bme680"
+    #   type: environment
+    # - id: 2
+    #   device: "sps30"
+    #   type: air_quality_aqi

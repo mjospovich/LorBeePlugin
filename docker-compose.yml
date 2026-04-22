@@ -129,6 +129,8 @@ services:
       - TZ=${TZ:-Europe/Zagreb}
       - LORA_CONFIG=/etc/lora/config.yaml
       - LORAWAN_STATE_DIR=/data/lorawan-state
+      # When packed uplink is skipped (missing snapshot/device), retry after this many seconds (5–120). Override in project .env.
+      - LORAWAN_SNAPSHOT_RETRY_SEC=${LORAWAN_SNAPSHOT_RETRY_SEC:-30}
     volumes:
       - ${LORBEE_STACK_ROOT:-.}/lora/chirpstack-node/config.yaml:/etc/lora/config.yaml:ro
       - ${LORBEE_SNAPSHOT_HOST:-./data/snapshot}:/data/snapshot:ro

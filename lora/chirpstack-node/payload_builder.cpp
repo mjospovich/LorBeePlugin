@@ -12,6 +12,13 @@ static void append_u16_be(std::vector<uint8_t>& b, uint16_t v) {
   b.push_back((uint8_t)(v & 0xff));
 }
 
+static void append_u32_be(std::vector<uint8_t>& b, uint32_t v) {
+  b.push_back((uint8_t)((v >> 24) & 0xff));
+  b.push_back((uint8_t)((v >> 16) & 0xff));
+  b.push_back((uint8_t)((v >> 8) & 0xff));
+  b.push_back((uint8_t)(v & 0xff));
+}
+
 static void append_i16_be(std::vector<uint8_t>& b, int16_t v) {
   append_u16_be(b, (uint16_t)v);
 }
@@ -165,6 +172,43 @@ static bool encode_data_field(const std::string& fname, const nlohmann::json& de
     long v = std::lround(dev[fname].get<double>() * 10.0);
     v = std::max(0L, std::min(v, 65534L));
     append_u16_be(buf, (uint16_t)v);
+    return true;
+  }
+  if(fname == "aqi") {
+    if(!dev.contains("aqi") || !dev["aqi"].is_number()) {
+      append_u16_be(buf, 0xffff);
+      return true;
+    }
+    int a = (int)std::lround(dev["aqi"].get<double>());
+    a = std::max(0, std::min(a, 500));
+    append_u16_be(buf, (uint16_t)a);
+    return true;
+  }
+  if(fname == "pressure_hpa") {
+    double p = NAN;
+    if(dev.contains("pressure_hpa") && dev["pressure_hpa"].is_number()) {
+      p = dev["pressure_hpa"].get<double>();
+    }
+    if(std::isnan(p)) {
+      append_u16_be(buf, 0xffff);
+      return true;
+    }
+    int pi = (int)std::lround(p);
+    pi = std::max(300, std::min(pi, 1100));
+    append_u16_be(buf, (uint16_t)pi);
+    return true;
+  }
+  if(fname == "gas_resistance_ohm") {
+    if(!dev.contains("gas_resistance_ohm") || !dev["gas_resistance_ohm"].is_number()) {
+      append_u32_be(buf, 0xffffffffu);
+      return true;
+    }
+    double g = dev["gas_resistance_ohm"].get<double>();
+    if(g < 0 || g > 4294967295.0) {
+      append_u32_be(buf, 0xffffffffu);
+      return true;
+    }
+    append_u32_be(buf, (uint32_t)std::llround(g));
     return true;
   }
   err = "unknown payload field name: " + fname;
