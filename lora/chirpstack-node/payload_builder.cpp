@@ -248,22 +248,33 @@ static bool threshold_rule_triggered(const nlohmann::json& value, const nlohmann
   return triggered;
 }
 
-static bool entry_alarm_triggered(const nlohmann::json& snap_root, const std::string& device_key,
+static uint8_t entry_alarm_field_mask(const nlohmann::json& snap_root, const std::string& device_key,
     const nlohmann::json& dev, const PayloadEntry& en) {
   const nlohmann::json* acfg = find_alarm_thresholds_for_device(snap_root, dev, device_key);
-  if(!acfg) { return false; }
+  if(!acfg) { return 0u; }
+
+  uint8_t mask = 0u;
+  size_t idx = 0;
 
   for(const std::string& fname : en.fields) {
+    if(idx >= 8) { break; }
     const nlohmann::json* rule = find_field_threshold_rule(*acfg, fname);
-    if(!rule) { continue; }
+    if(!rule) {
+      ++idx;
+      continue;
+    }
 
     nlohmann::json value;
-    if(!read_field_value_json(fname, dev, value)) { continue; }
+    if(!read_field_value_json(fname, dev, value)) {
+      ++idx;
+      continue;
+    }
 
-    if(threshold_rule_triggered(value, *rule)) { return true; }
+    if(threshold_rule_triggered(value, *rule)) { mask |= (uint8_t)(1u << idx); }
+    ++idx;
   }
 
-  return false;
+  return mask;
 }
 
 static void append_status_block(const nlohmann::json& dev, std::vector<uint8_t>& buf) {
@@ -453,9 +464,9 @@ bool build_packed_uplink_payload(const AppConfig& cfg, const nlohmann::json& sna
 
   if(has_alarm_out) { *has_alarm_out = false; }
 
-  // v4: self-describing entries — each entry carries its sensor_type byte
+  // v5: self-describing entries — each entry carries its sensor_type byte
   // so the decoder doesn't need a positional PLAN, just the type registry.
-  append_u8(out, 0x04);
+  append_u8(out, 0x05);
   append_u8(out, cfg.payload.include_status ? 1u : 0u);
 
   for(const PayloadEntry& en : cfg.payload.entries) {
@@ -466,14 +477,13 @@ bool build_packed_uplink_payload(const AppConfig& cfg, const nlohmann::json& sna
       return false;
     }
     const nlohmann::json& dev = *pdev;
-
-    const bool alarm = entry_alarm_triggered(snap_root, en.device, dev, en);
-    if(alarm && has_alarm_out) { *has_alarm_out = true; }
+    const uint8_t alarm_mask = entry_alarm_field_mask(snap_root, en.device, dev, en);
+    if(alarm_mask != 0u && has_alarm_out) { *has_alarm_out = true; }
     uint8_t stype_wire = static_cast<uint8_t>(en.sensor_type) & 0x7fu;
-    if(alarm) { stype_wire |= 0x80u; }
 
     append_u8(out, en.id);
     append_u8(out, stype_wire);
+    append_u8(out, alarm_mask);
 
     for(const std::string& fn : en.fields) {
       if(!encode_data_field(fn, dev, out, err)) { return false; }

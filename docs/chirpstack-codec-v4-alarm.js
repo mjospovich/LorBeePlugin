@@ -109,10 +109,21 @@ function decodeUplink(input) {
   };
 
   var out = {};
+  function alarmFieldNames(typeDef, alarmMask) {
+    var names = [];
+    for (var i = 0; i < typeDef.fields.length && i < 8; i++) {
+      if ((alarmMask & (1 << i)) !== 0) {
+        var fn = typeDef.fields[i];
+        names.push(FIELD_KEYS[fn] || fn);
+      }
+    }
+    return names;
+  }
 
-  // --- v4: self-describing entries ---
-  // sensor_type byte bit7 = alarm flag, bits0..6 = type ID
-  if (ver === 0x04) {
+  // --- v4/v5: self-describing entries ---
+  // v4: sensor_type bit7 = alarm flag, bits0..6 = type ID.
+  // v5: sensor_type uses bits0..6 only, and every entry carries one alarm mask byte.
+  if (ver === 0x04 || ver === 0x05) {
     if (hasAck && o + 2 <= b.length) {
       var ackCmd = readU8();
       var ackOk = readU8();
@@ -121,7 +132,6 @@ function decodeUplink(input) {
     while (o < b.length) {
       var eid = readU8();
       var stypeRaw = readU8();
-      var alarm = (stypeRaw & 0x80) !== 0;
       var stype = stypeRaw & 0x7f;
 
       var td = TYPES[stype];
@@ -131,11 +141,18 @@ function decodeUplink(input) {
       }
       var key = LABELS[eid] !== undefined ? LABELS[eid] : td.name + '_' + eid;
       var row = { entry_id: eid, sensor_type: td.name };
+      var alarmMask = 0;
+      if (ver === 0x05 && o < b.length) {
+        alarmMask = readU8();
+      }
       for (var fi = 0; fi < td.fields.length; fi++) {
         var fn = td.fields[fi];
         row[FIELD_KEYS[fn] || fn] = readField(fn);
       }
-      if (alarm) row.alarm = 1;
+      if (ver === 0x05) {
+        var af = alarmFieldNames(td, alarmMask);
+        if (af.length > 0) row.alarm_fields = af;
+      }
       if (includeStatus) readStatus(row);
       out[key] = row;
     }
